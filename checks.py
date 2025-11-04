@@ -201,7 +201,7 @@ def check_double_vertices(obj, threshold=0.0001):
 
     bm.free()
     if double_count > 0:
-        return [("Double Vertices: ", f"{double_count} within {threshold}m", "WARNING")]
+        return [("Double Vertices: ", f"{double_count} within {threshold}m", "ERROR")]
     return [("Double Vertices: ", "None found", "INFO")]
 
 def check_geometry(obj, settings):
