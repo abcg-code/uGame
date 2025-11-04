@@ -46,7 +46,8 @@ from .texture_checks import (
     check_texture_filename,
     check_texture_suffix,
     check_texture_resolution,
-    is_node_connected
+    is_node_connected,
+    infer_map_type
 )
 
 def check_collection_structure(collection):
@@ -179,7 +180,7 @@ def check_transforms(obj, settings):
 def check_normals(obj):
     flipped = check_flipped_normals(obj)
     if flipped > 0:
-        return [("Normals", f"{flipped} faces appear flipped", "ERROR")]
+        return [("Normals", f"{flipped} faces appear flipped", "WARNING")]
     return [("Normals", "No flipped normals detected", "INFO")]
 
 def check_double_vertices(obj, threshold=0.0001):
@@ -332,21 +333,24 @@ def check_textures(obj):
                 tile_count = len(img.tiles)
                 report.append((f"[{mat.name}] UDIM detected", f"{tile_count} tiles", "INFO"))
 
-            for map_type, suffixes in {**required_maps, **optional_maps}.items():
-                for suffix in suffixes:
-                    if suffix.lower() in img.name.lower():
-                        found_maps.add(map_type)
+            map_type = infer_map_type(img.name)
+            if map_type:
+                found_maps.add(map_type)
 
             if not is_node_connected(node):
                 report.append((f"[{mat.name}] Image node not connected", img.name, "WARNING"))
 
-    missing_required = [m for m in required_maps if m not in found_maps]
-    for map_type in missing_required:
-        report.append((f"Missing Texture Map: {map_type}", "Not found", "ERROR"))
+    for map_type in required_maps:
+        if map_type not in found_maps:
+            if map_type == "Roughness":
+                level = "ERROR" if is_hero_asset else "WARNING"
+                report.append((f"Missing Texture Map: {map_type}", "Not found", level))
+            else:
+                report.append((f"Missing Texture Map: {map_type}", "Not found", "ERROR"))
 
     missing_optional = [m for m in optional_maps if m not in found_maps]
     if missing_optional:
-        report.append((f"Optional Maps", "Missing: " + ",".join(missing_optional), "WARNING"))
+        report.append((f"Optional Maps", "Missing: " + ", ".join(missing_optional), "WARNING"))
 
     if found_maps:
         summary = ", ".join(sorted(found_maps))

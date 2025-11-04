@@ -124,7 +124,7 @@ def build_final_summary(report_data, width=150):
 
         if "Geometry" in issues:
             geo_labels = sorted([
-                f"{label} ({value})" if label == "Unapplied Transforms" and value else label
+                f"{label.strip()} ({value})" if value and value != "None found" else label.strip()
                 for label, value, level in issues["Geometry"]
                 if level == "ERROR"
             ])
@@ -132,10 +132,18 @@ def build_final_summary(report_data, width=150):
                 parts.append(("Geometry", geo_labels))
 
         if "Textures" in issues:
-            tex_labels = sorted({
-                label for label, _, level in issues["Textures"]
-                if level == "ERROR" and not label.startswith("Missing Texture Map:")
-            })
+            texture_errors = defaultdict(list)
+            for label, _, level in issues["Textures"]:
+                if level == "ERROR" and not label.startswith("Missing Texture Map:"):
+                    if label.startswith("[") and "]" in label:
+                        tex_name = label.split("]")[0][1:]
+                        tex_issue = label.split("]")[1].strip()
+                        texture_errors[tex_name].append(tex_issue)
+
+            tex_labels = [
+                f"[{tex_name}] " + ", ".join(sorted(problems))
+                for tex_name, problems in sorted(texture_errors.items())
+            ]
             if tex_labels:
                 parts.append(("Texture", tex_labels))
 
@@ -185,13 +193,13 @@ def build_final_summary(report_data, width=150):
 
             for i, label in enumerate(labels):
                 label_text = label + (", " if i < len(labels) -1 else "")
-                if current_length + len(label_text) > width:
+                if i == 0 or current_length + len(label_text) <= width:
+                    line += label_text
+                    current_length += len(label_text)
+                else:
                     object_lines.append(line.rstrip(", "))
                     line = continuation_indent + label_text
                     current_length = len(line)
-                else:
-                    line += label_text
-                    current_length += len(label_text)
 
             line += "] "
             current_length += 1

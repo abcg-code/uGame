@@ -39,9 +39,9 @@ section_aliases = {
 }
 
 required_maps = {
-    "Diffuse": {"_c", "_col", "_color", "_basecolor", "albedo", "diffuse"},
+    "Diffuse": {"_c", "_col", "_color", "_basecolor", "_albedo", "_diffuse"},
     "Normal": {"_n", "_nrm", "_normal"},
-    "Roughness": {"_r", "_roughness", "_rma"},
+    "Roughness": {"_r", "_roughness", "_rma"}
 }
 
 optional_maps = {

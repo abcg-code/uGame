@@ -29,6 +29,17 @@ from .constants import (
     banned_patterns
 )
 
+def infer_map_type(name):
+    name = name.lower()
+    for map_type in required_maps:
+        if map_type.lower() in name:
+            return map_type
+    for map_type in optional_maps:
+        if map_type.lower() in name:
+            return map_type
+    return None
+
+
 def check_texture_filename(img, strict):
     report = []
     name = img.name
@@ -52,16 +63,30 @@ def check_texture_filename(img, strict):
 
 def check_texture_suffix(img, strict):
     report = []
-    name = os.path.splitext(img.name)[0].lower()
-    matched = False
+    name_raw = os.path.splitext(img.name)[0]
+    name = name_raw.lower()
+    map_type = infer_map_type(name)
 
-    for map_type, suffixes in {**required_maps, **optional_maps}.items():
-        if any(name.endswith(suffix.lower()) for suffix in suffixes):
-            matched = True
-            break
+    all_suffixes = set().union(*required_maps.values(), *optional_maps.values())
 
-    if strict and not matched:
-        report.append(("Unrecognised suffix", img.name, "ERROR"))
+    has_valid_suffix = any(
+        name != suffix and name.endswith(suffix)
+        for suffix in all_suffixes
+    )
+
+    if not has_valid_suffix:
+        report.append(("Texture name invalid", img.name, "ERROR"))
+
+    if map_type:
+        suffixes = required_maps.get(map_type, set()) | optional_maps.get(map_type, set())
+        if not any(name.endswith(suffix) for suffix in suffixes):
+            report.append((f"Missing required suffix for {map_type}", img.name, "ERROR"))
+
+    if strict:
+        for map_type, suffixes in optional_maps.items():
+            if map_type.lower() in name:
+                if not any(name.endswith(suffix) for suffix in suffixes):
+                    report.append((f"Missing optional suffix for {map_type}", img.name, "WARNING"))
 
     return report
 
@@ -71,19 +96,19 @@ def check_texture_resolution(img, is_hero_asset):
     min_dim = min(w, h)
 
     if min_dim < 256:
-        report.append(("Very low resolution", img.name, "ERROR"))
+        report.append((f"Very low resolution ({w}x{h})", img.name, "ERROR"))
     elif is_hero_asset and min_dim < 2048:
-        report.append(("Too low for Hero Asset", img.name, "ERROR"))
+        report.append((f"Resolution too low for Hero Asset ({w}x{h})", img.name, "ERROR"))
     elif not is_hero_asset and min_dim > 1024:
-        report.append(("Too high for background Asset", img.name, "ERROR"))
+        report.append((f"Resolution too high for background Asset ({w}x{h})", img.name, "ERROR"))
     elif min_dim < 512:
-        report.append(("Low resolution", img.name, "INFO"))
+        report.append((f"Low resolution ({w}x{h})", img.name, "INFO"))
     else:
-        report.append(("Resolution OK", img.name, "INFO"))
+        report.append((f"Resolution OK ({w}x{h})", img.name, "INFO"))
 
     pot = (w & (w -1) == 0) and (h & (h - 1) == 0)
     if not pot:
-        report.append(("Not power-of-two", img.name, "ERROR"))
+        report.append((f"Not power-of-two ({w}x{h})", img.name, "ERROR"))
     
     return report
 
