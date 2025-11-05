@@ -124,3 +124,4 @@ def get_collection_uv_utilization(collection):
     level = "INFO" if utilization >= 90 else "WARNING"
     report.append(("UV Space Utilization", f"{utilization}%", level))
     return report
+

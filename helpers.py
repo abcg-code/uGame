@@ -40,6 +40,20 @@ def get_transform_status(obj):
     location_applied = all(round(val, 3) == 0.0 for val in obj.location)
     return scale_applied, rotation_applied, location_applied
 
+def is_color_atlas(obj, utilization, uvs, has_normal, has_roughness):
+    if not uvs:
+        return False
+
+    unique_uvs = set(uv.to_tuple() for uv in uvs)
+    unique_ratio = len(unique_uvs) / len(uvs)
+
+    return (
+        utilization < 10.0 and
+        unique_ratio < 0.1 and
+        not has_normal and
+        not has_roughness
+    )
+
 def calculate_uv_area(face, uv_layer):
     uv_coords = [loop[uv_layer].uv for loop in face.loops]
     if len(uv_coords) < 3:
@@ -120,7 +134,7 @@ def get_uv_utilization(obj):
     overflow = uv_area > 1.0 or max_uv.x > 1.0 or max_uv.y >1.0 or min_uv.x < 0.0 or min_uv.y < 0.0
     utilization_percent = round(clamped_area * 100, 2)
 
-    return utilization_percent, overflow
+    return utilization_percent, overflow, uvs
 
 def get_uv_bounds(uvs):
     min_uv = Vector((min(uv.x for uv in uvs), min(uv.y for uv in uvs)))
@@ -133,3 +147,62 @@ def get_all_objects_recursive(collection):
         objs.extend(get_all_objects_recursive(child))
     return objs
 
+def count_uv_islands(obj):
+    mesh = obj.data
+    bm = bmesh.new()
+    bm.from_mesh(mesh)
+    uv_layer = bm.loops.layers.uv.active
+    if not uv_layer:
+        return 0
+
+    visited_faces = set()
+    islands = 0
+
+    for face in bm.faces:
+        if face in visited_faces:
+            continue
+
+        stack = [face]
+        connected = set()
+
+        while stack:
+            current = stack.pop()
+            if current in visited_faces:
+                continue
+            visited_faces.add(current)
+            connected.add(current)
+
+            for edge in current.edges:
+                if not edge.seam:
+                    for linked_face in edge.link_faces:
+                        if linked_face not in visited_faces:
+                            stack.append(linked_face)
+
+        if connected:
+            islands += 1
+    
+    bm.free()
+    return islands
+
+def get_total_uv_and_face_area(obj):
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    uv_layer = bm.loops.layers.uv.active
+
+    total_uv_area = 0.0
+    total_face_area =0.0
+    if uv_layer:
+        for face in bm.faces:
+            face_area = face.calc_area()
+            total_face_area += face_area
+            uv_area = calculate_uv_area(face, uv_layer)
+            total_face_area += uv_area
+
+    bm.free()
+    return total_uv_area, total_face_area
+
+def is_uv_layout_stacked(uvs, threshold=0.1):
+    if not uvs:
+        return False
+    unique_uvs = set(uv.to_tuple() for uv in uvs)
+    return len(unique_uvs) / len(uvs) < threshold

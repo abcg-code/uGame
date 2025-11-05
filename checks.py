@@ -24,6 +24,7 @@ import bpy
 import bmesh
 import fnmatch
 import mathutils
+from collections import defaultdict
 from .helpers import (
     is_location_applied,
     get_top_parent,
@@ -32,7 +33,10 @@ from .helpers import (
     get_uv_utilization,
     get_uv_bounds,
     get_all_objects_recursive,
-    calculate_uv_area
+    calculate_uv_area,
+    count_uv_islands,
+    get_total_uv_and_face_area,
+    is_uv_layout_stacked
 )
 from .constants import (
     required_maps,
@@ -47,7 +51,8 @@ from .texture_checks import (
     check_texture_suffix,
     check_texture_resolution,
     is_node_connected,
-    infer_map_type
+    infer_map_type,
+    get_clean_map_type
 )
 
 def check_collection_structure(collection):
@@ -247,51 +252,73 @@ def check_uvs(obj):
     if bpy.context.mode != 'OBJECT':
         bpy.ops.object.mode_set(mode='OBJECT')
 
+    settings = bpy.context.scene.ugame_settings
     mesh = obj.data
+    aaa_mode = settings.aaa_game_check
+    target = 90.0 if aaa_mode else 80.0
+    pass_threshold = 85.0 if aaa_mode else 70.0
+
     uv_unwrapped = bool(mesh.uv_layers)
     seams_exist = any(edge.use_seam for edge in mesh.edges)
 
     report.append(("UV Unwrapped", str(uv_unwrapped), "INFO" if uv_unwrapped else "ERROR"))
     report.append(("Marked Seams", "Found" if seams_exist else "None",  "INFO" if seams_exist else "ERROR"))
 
-    if uv_unwrapped and not seams_exist:
-        report.append(("Unwrapping Quality", "Likely default UVs", "ERROR"))
+    if not mesh.uv_layers.active:
+        report.append(("UV Layer", "No active UV layer found", "ERROR"))
+        return report
 
-    if uv_unwrapped:
-        bm = bmesh.new()
-        bm.from_mesh(mesh)
-        uv_layer = bm.loops.layers.uv.active
+    uv_islands = count_uv_islands(obj)
+    is_simple_mesh = len(mesh.polygons) < 100 and len(mesh.vertices) < 150
+    
+    if uv_islands == 1 and is_simple_mesh:
+        report.append(("UV Island Count", f"{uv_islands} island (simple mesh)", "INFO"))
+    else:
+        threshold = 50 if settings.is_hero_asset else 25
+        if uv_islands > threshold:
+            level = "ERROR"
+        elif uv_islands > threshold * 0.75:
+            level = "WARNING"
+        else:
+            level = "INFO"
+        report.append(("UV Island Count", f"{uv_islands} islands", level))
 
-        if uv_layer:
-            total_uv_area = 0.0
-            total_face_area = 0.0
+    utilization, overflow, uvs = get_uv_utilization(obj)
+    unique_uvs = set(uv.to_tuple() for uv in uvs) if uvs else set()
+    unique_ratio = len(unique_uvs) / len(uvs) if uvs else 0
 
-            for face in bm.faces:
-                face_area = face.calc_area()
-                total_face_area =+ face_area
-                uv_area = calculate_uv_area(face, uv_layer)
-                total_uv_area += uv_area
+    texture_map_names = [slot.name for slot in obj.material_slots if slot.material]
+    has_normal = "Normal" in texture_map_names
+    has_roughness = "Roughness" in texture_map_names
 
-        bm.free()
+    is_color_atlas = (
+        utilization < 10.0 and
+        unique_ratio < 0.1 and
+        not has_normal and
+        not has_roughness
+    )
 
-        aaa_mode = bpy.context.scene.ugame_settings.aaa_game_check
+    if is_color_atlas:
+        report.append(("UV Strategy", "Color atlas detected - texel checks skipped", "INFO"))
+
+    if uv_unwrapped and not is_color_atlas:
+        total_uv_area, total_face_area = get_total_uv_and_face_area(obj)
         ratio = round(total_uv_area / total_face_area, 2) if total_face_area > 0 else 0
         passed = ratio >= TEXEL_DENSITY_MIN_AAA if aaa_mode else TEXEL_DENSITY_RANGE[0] <= ratio <= TEXEL_DENSITY_RANGE[1]
         report.append(("Texel Density Ratio (px/cm)", str(ratio), "INFO" if passed else "WARNING"))
 
-    avg_density, deviation = get_island_texel_densities(obj)
-    report.append(("Texel Density Avg", f"{round(avg_density, 2)}", "INFO"))
-    report.append(("Texel Density Deviation", f"{round(deviation, 2)}", "WARNING" if deviation > TEXEL_DENSITY_DEVIATION_THRESHOLD * avg_density else "INFO"))
+        avg_density, deviation = get_island_texel_densities(obj)
+        report.append(("Texel Density Avg", f"{round(avg_density, 2)}", "INFO"))
+        report.append(("Texel Density Deviation", f"{round(deviation, 2)}", "WARNING" if deviation > TEXEL_DENSITY_DEVIATION_THRESHOLD * avg_density else "INFO"))
 
-    utilization, overflow = get_uv_utilization(obj)
-    aaa_mode = bpy.context.scene.ugame_settings.aaa_game_check
-    target = 90.0 if aaa_mode else 80.00
-    pass_threshold = 85.0 if aaa_mode else 70.0
+        if is_uv_layout_stacked(uvs):
+            level = "ERROR" if settings.is_hero_asset else "WARNING"
+            report.append(("UV Layout", "Majority of UVs are stacked or overlapping", level))
 
-    if utilization == 0.0:
-        report.append(("UV Space Utilization", "UV layer exists but contains no data", "WARNING"))
+    if utilization == 0.0 and len(uvs) > 0:
+        report.append(("UV Space Utilization", "UVs exist, but layout is collapsed or invalid", "WARNING"))
     elif overflow:
-        report.append(("UV Space Utilization", f"{utilization}% (UVs exceed 0-1 space)", "WARNING"))
+        report.append(("UV Space Utilization", f"{utilization}% (UVs exceed 0-1 space)", "ERROR"))
     elif utilization >= pass_threshold:
         report.append(("UV Space Utilization", f"{utilization}%", "INFO"))
     elif utilization >= target - 5:
@@ -302,15 +329,27 @@ def check_uvs(obj):
     if aaa_mode:
         report.append(("AAA Target", "UV Utilization should be ~90%", "INFO"))
 
+    if uv_unwrapped and not seams_exist and not is_color_atlas:
+        smart_uv = island_count > 50
+        poor_density = ratio < 0.5 or deviation > TEXEL_DENSITY_DEVIATION_THRESHOLD * avg_density
+        level = "ERROR" if settings.is_hero_asset else "WARNING"
+
+        if smart_uv and poor_density:    
+            report.append(("Unwrapping Quality", "Likely Smart UV Project with poor texel density", level))
+        elif smart_uv:
+            report.append(("Unwrapping Quality", "Likely Smart UV Project", level))
+        else:
+            report.append(("Unwrapping Quality", "Likely default UVs", "ERROR"))
+
     return report
 
 def check_textures(obj):
     report = []
     used_images = set()
     found_maps = set()
-
-    strict = bpy.context.scene.ugame_settings.aaa_game_check
-    is_hero_asset = bpy.context.scene.ugame_settings.is_hero_asset
+    settings = bpy.context.scene.ugame_settings
+    strict = settings.aaa_game_check
+    is_hero_asset = settings.is_hero_asset
 
     for mat_slot in obj.material_slots:
         mat = mat_slot.material
@@ -333,7 +372,7 @@ def check_textures(obj):
                 tile_count = len(img.tiles)
                 report.append((f"[{mat.name}] UDIM detected", f"{tile_count} tiles", "INFO"))
 
-            map_type = infer_map_type(img.name)
+            map_type = get_clean_map_type(img)
             if map_type:
                 found_maps.add(map_type)
 
