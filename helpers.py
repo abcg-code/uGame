@@ -215,5 +215,5 @@ def get_total_uv_and_face_area(obj):
 def is_uv_layout_stacked(uvs, threshold=0.1):
     if not uvs:
         return False
-    unique_uvs = set(uv.to_tuple() for uv in uvs)
+    unique_uvs = set((round(u, 5), round(v, 5)) for u, v in uvs)
     return len(unique_uvs) / len(uvs) < threshold

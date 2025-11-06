@@ -291,15 +291,18 @@ def check_uvs(obj):
     has_normal = "Normal" in texture_map_names
     has_roughness = "Roughness" in texture_map_names
 
-    is_color_atlas = (
-        utilization < 10.0 and
-        unique_ratio < 0.1 and
-        not has_normal and
-        not has_roughness
-    )
+    atlas_score = 0
+    if utilization < 10.0: atlas_score += 1
+    if unique_ratio < 0.1: atlas_score += 1
+    if not has_normal: atlas_score += 1
+    if not has_roughness: atlas_score += 1
+    if uv_islands < 10: atlas_score += 1
+    if not seams_exist: atlas_score += 1
+
+    is_color_atlas = atlas_score >= 5
 
     if is_color_atlas:
-        report.append(("UV Strategy", "Color atlas detected - texel checks skipped", "INFO"))
+        report.append(("UV Strategy", f"Color atlas confidence: {atlas_score}/6", "INFO" if is_color_atlas else "WARNING"))
 
     if uv_unwrapped and not is_color_atlas:
         total_uv_area, total_face_area = get_total_uv_and_face_area(obj)
