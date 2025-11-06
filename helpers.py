@@ -108,8 +108,8 @@ def get_uv_utilization(obj):
     mesh = obj.data
     bm = bmesh.new()
     bm.from_mesh(mesh)
-    uv_layer = bm.loops.layers.uv.active
 
+    uv_layer = bm.loops.layers.uv.active
     if not uv_layer:
         bm.free()
         return 0.0, False, []
@@ -123,8 +123,10 @@ def get_uv_utilization(obj):
         for face in bm.faces:
             for loop in face.loops:
                 uv = loop[uv_layer].uv
+                uv_vec = Vector((uv.x, uv.y))
                 uvs.append(uv)
-                u, v = uv.x, uv.y
+
+                u, v = uv_vec.x, uv_vec.y
 
                 min_u = min(min_u, u)
                 min_v = min(min_v, v)
