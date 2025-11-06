@@ -284,7 +284,7 @@ def check_uvs(obj):
         report.append(("UV Island Count", f"{uv_islands} islands", level))
 
     utilization, overflow, uvs = get_uv_utilization(obj)
-    unique_uvs = set(uv.to_tuple() for uv in uvs) if uvs else set()
+    unique_uvs = set((uv.x, uv.y) for uv in uvs) if uvs else set()
     unique_ratio = len(unique_uvs) / len(uvs) if uvs else 0
 
     texture_map_names = [slot.name for slot in obj.material_slots if slot.material]

@@ -123,11 +123,10 @@ def get_uv_utilization(obj):
         for face in bm.faces:
             for loop in face.loops:
                 uv = loop[uv_layer].uv
-                uv_vec = Vector((uv.x, uv.y))
-                uvs.append(uv)
+                uv_tuple = (uv.x, uv.y)
+                uvs.append(uv_tuple)
 
-                u, v = uv_vec.x, uv_vec.y
-
+                u, v = uv_tuple
                 min_u = min(min_u, u)
                 min_v = min(min_v, v)
                 max_u = max(max_u, u)
