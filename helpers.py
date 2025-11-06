@@ -105,36 +105,41 @@ def get_island_texel_densities(obj):
     return avg_density, deviation
 
 def get_uv_utilization(obj):
-    if obj.type != 'MESH':
-        return 0.0, False
-
     mesh = obj.data
-    uv_layer = mesh.uv_layers.active
+    bm = bmesh.new()
+    bm.from_mesh(mesh)
+    uv_layer = bm.loops.layers.uv.active
+
     if not uv_layer:
-        return 0.0, False
-    
-    uvs = [loop.uv for loop in uv_layer.data]
-    if not uvs:
-        return 0.0, False
-    
-    min_uv, max_uv = get_uv_bounds(uvs)
-    uv_area = (max_uv.x - min_uv.x) * (max_uv.y - min_uv.y)
+        bm.free()
+        return 0.0, False, []
 
-    clamped_min = Vector((
-        max(0.0, min(min_uv.x, 1.0)),
-        max(0.0, min(min_uv.y, 1.0))
-    ))
-    clamped_max = Vector((
-        max(0.0, min(min_uv.x, 1.0)),
-        max(0.0, min(min_uv.y, 1.0))
-    ))
-    
-    clamped_area = (clamped_max.x - clamped_min.x) * (clamped_max.y - clamped_min.y)
+    uvs = []
+    min_u, min_v = 1.0, 1.0
+    max_u, max_v = 0.0, 0.0
+    overflow = False
 
-    overflow = uv_area > 1.0 or max_uv.x > 1.0 or max_uv.y >1.0 or min_uv.x < 0.0 or min_uv.y < 0.0
-    utilization_percent = round(clamped_area * 100, 2)
+    for face in bm.faces:
+        for loop in face.loops:
+            uv = loop[uv_layer].uv
+            uvs.append(uv)
+            u, v = uv.x, uv.y
 
-    return utilization_percent, overflow, uvs
+            min_u = min(min_u, u)
+            min_v = min(min_v, v)
+            max_u = max(max_u, u)
+            max_v = max(max_v, v)
+
+            if u < 0.0 or u > 1.0 or v < 0.0 or v > 1.0:
+                overflow = True
+
+    bm.free()
+
+    width = max_u - min_u
+    height = max_v - min_v
+    utilization = round(width * height * 100, 2) if uvs else 0.0
+
+    return utilization, overflow, uvs
 
 def get_uv_bounds(uvs):
     min_uv = Vector((min(uv.x for uv in uvs), min(uv.y for uv in uvs)))

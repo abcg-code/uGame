@@ -330,7 +330,7 @@ def check_uvs(obj):
         report.append(("AAA Target", "UV Utilization should be ~90%", "INFO"))
 
     if uv_unwrapped and not seams_exist and not is_color_atlas:
-        smart_uv = island_count > 50
+        smart_uv = uv_islands > 50
         poor_density = ratio < 0.5 or deviation > TEXEL_DENSITY_DEVIATION_THRESHOLD * avg_density
         level = "ERROR" if settings.is_hero_asset else "WARNING"
 
