@@ -119,19 +119,24 @@ def get_uv_utilization(obj):
     max_u, max_v = 0.0, 0.0
     overflow = False
 
-    for face in bm.faces:
-        for loop in face.loops:
-            uv = loop[uv_layer].uv
-            uvs.append(uv)
-            u, v = uv.x, uv.y
+    try:
+        for face in bm.faces:
+            for loop in face.loops:
+                uv = loop[uv_layer].uv
+                uvs.append(uv)
+                u, v = uv.x, uv.y
 
-            min_u = min(min_u, u)
-            min_v = min(min_v, v)
-            max_u = max(max_u, u)
-            max_v = max(max_v, v)
+                min_u = min(min_u, u)
+                min_v = min(min_v, v)
+                max_u = max(max_u, u)
+                max_v = max(max_v, v)
 
-            if u < 0.0 or u > 1.0 or v < 0.0 or v > 1.0:
-                overflow = True
+                if u < 0.0 or u > 1.0 or v < 0.0 or v > 1.0:
+                    overflow = True
+    except Exception as e:
+        print(f"UV read error: {e}")
+        bm.free()
+        return 0.0, False, []
 
     bm.free()
 
