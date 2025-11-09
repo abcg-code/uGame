@@ -217,3 +217,4 @@ def is_uv_layout_stacked(uvs, threshold=0.1):
         return False
     unique_uvs = set((round(u, 5), round(v, 5)) for u, v in uvs)
     return len(unique_uvs) / len(uvs) < threshold
+    

@@ -58,6 +58,8 @@ def check_texture_filename(img, strict):
         report.append(("Filename includes resolution", name, "ERROR"))
     elif has_resolution_tag:
         report.append(("Filename includes resolution", name, "WARNING"))
+    else:
+        report.append(("Filename OK", name, "INFO"))
 
     if any(fnmatch.fnmatch(name_lower, pattern) for pattern in banned_patterns):
         report.append(("Contains disallowed term", name, "ERROR"))
@@ -78,6 +80,8 @@ def check_texture_suffix(img, strict):
 
     if not has_valid_suffix:
         report.append(("Texture name invalid", img.name, "ERROR"))
+    else:
+        report.append(("Texture name OK", img.name, "INFO"))
 
     if map_type:
         suffixes = required_maps.get(map_type, set()) | optional_maps.get(map_type, set())
@@ -104,7 +108,7 @@ def check_texture_resolution(img, is_hero_asset):
     elif not is_hero_asset and min_dim > 1024:
         report.append((f"Resolution too high for background Asset ({w}x{h})", img.name, "ERROR"))
     elif min_dim < 512:
-        report.append((f"Low resolution ({w}x{h})", img.name, "INFO"))
+        report.append((f"Low resolution ({w}x{h})", img.name, "WARNING"))
     else:
         report.append((f"Resolution OK ({w}x{h})", img.name, "INFO"))
 
