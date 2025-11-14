@@ -23,9 +23,8 @@ along with this program; if not, see https://www.gnu.org/licenses.
 import bpy
 from .utils import (
     is_high_poly,
-    get_selected_collection,
     get_all_objects_in_collection,
-    collect_object_sections
+    get_collection_uv_utilization
 )
 from .report_utils import (
     collect_report_data,
@@ -33,8 +32,14 @@ from .report_utils import (
     build_per_object_detail,
     open_report_in_new_window,
     format_collection_block,
-    report_has_errors
+    report_has_errors,
+    normalize_section
 )
+from .helpers import (
+    dispatch_checks,
+    infer_section_from_label
+)
+from collections import defaultdict
 
 class OBJECT_OT_CheckGameReady(bpy.types.Operator):
     bl_idname = "object.check_game_ready"
@@ -45,7 +50,6 @@ class OBJECT_OT_CheckGameReady(bpy.types.Operator):
 
     def execute(self, context):
         report_lines = []
-        final_summary_lines = []
         settings = context.scene.ugame_settings
 
         scan_single = settings.scan_single_object
@@ -99,10 +103,28 @@ class OBJECT_OT_CheckGameReady(bpy.types.Operator):
             self.report({'WARNING'}, "No valid objects found to scan.")
             return {'CANCELLED'}
 
-        settings = context.scene.ugame_settings
-        report_data = collect_report_data(objects_to_check, settings)
+        mesh_objects = [obj for obj in objects_to_check if obj.type == 'MESH']
+        report_data = collect_report_data(mesh_objects, settings)
 
-        final_summary_text = build_final_summary(report_data)
+        collection_utilization = None
+        if scan_collection and selected_collection:
+            uv_report = get_collection_uv_utilization(selected_collection)
+            for label, value, level in uv_report:
+                if "UV Space Utilization" in label and value:
+                    try:
+                        collection_utilization = float(str(value).strip("%"))
+                    except:
+                        pass
+
+        final_summary_text = build_final_summary(
+            report_data,
+            collection_utilization=collection_utilization,
+            asset_collection_mode=settings.asset_collection_mode,
+            active_object_mode=scan_single,
+            scan_single=scan_single,
+            scan_collection=scan_collection,
+            scan_file=scan_file
+        )
 
         # Report Header
         report_lines.append("Game-Ready Check Report\n=======================\n\n")
@@ -144,8 +166,20 @@ class OBJECT_OT_CheckGameReady(bpy.types.Operator):
 
         # Per-object detail
         settings = context.scene.ugame_settings
-        for obj in objects_to_check:
-            obj_sections = collect_object_sections(obj, settings)
+        for obj in mesh_objects:
+            flat_report = dispatch_checks(obj, settings)
+            sectioned = defaultdict(list)
+
+            for item in flat_report:
+                if isinstance(item, tuple) and len(item) == 3:
+                    label, value, level = item
+                    raw_section = infer_section_from_label(label)
+                    section = normalize_section(raw_section)
+                    sectioned[section].append((label, value, level))
+                else:
+                    sectioned["Other"].append(item)
+
+            obj_sections = dict(sectioned)
             report_lines.extend(build_per_object_detail(obj.name, obj_sections, settings))
 
         # Output

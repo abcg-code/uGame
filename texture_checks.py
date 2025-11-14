@@ -46,42 +46,17 @@ def get_clean_name(img):
 def get_clean_map_type(img):
     return infer_map_type(get_clean_name(img))
 
-def check_texture_filename(img, strict):
+def check_texture_naming(img, strict):
     report = []
     name = img.name
     name_lower = name.lower()
-    name_no_ext = os.path.splitext(name)[0]
-    resolution_pattern = r'[-_]?\d{3,5}x\d{3,5}$'
-    has_resolution_tag = re.search(resolution_pattern, name_no_ext)
-
-    if strict and has_resolution_tag:
-        report.append(("Filename includes resolution", name, "ERROR"))
-    elif has_resolution_tag:
-        report.append(("Filename includes resolution", name, "WARNING"))
-    else:
-        report.append(("Filename OK", name, "INFO"))
-
-    if any(fnmatch.fnmatch(name_lower, pattern) for pattern in banned_patterns):
-        report.append(("Contains disallowed term", name, "ERROR"))
-
-    if strict and not any(name.startswith(prefix) for prefix in valid_prefixes):
-        report.append(("Missing valid prefix (T_ or TEX_)", name, "WARNING"))
-
-    return report
-
-def check_texture_suffix(img, strict):
-    report = []
     name_clean = get_clean_name(img)
     map_type = infer_map_type(name_clean)
 
     all_suffixes = set().union(*required_maps.values(), *optional_maps.values())
-
     has_valid_suffix = any(name_clean.endswith(suffix) for suffix in all_suffixes)
-
     if not has_valid_suffix:
         report.append(("Texture name invalid", img.name, "ERROR"))
-    else:
-        report.append(("Texture name OK", img.name, "INFO"))
 
     if map_type:
         suffixes = required_maps.get(map_type, set()) | optional_maps.get(map_type, set())
@@ -89,10 +64,16 @@ def check_texture_suffix(img, strict):
             report.append((f"Missing required suffix for {map_type}", img.name, "ERROR"))
 
     if strict:
-        for map_type, suffixes in optional_maps.items():
-            if map_type.lower() in name_clean:
+        for mt, suffixes in optional_maps.items():
+            if mt.lower() in name_clean:
                 if not any(name_clean.endswith(suffix) for suffix in suffixes):
-                    report.append((f"Missing optional suffix for {map_type}", img.name, "WARNING"))
+                    report.append((f"Missing optional suffix for {mt}", name, "WARNING"))
+
+    if any(fnmatch.fnmatch(name_lower, pattern) for pattern in banned_patterns):
+        report.append(("Contains disallowed term", name, "ERROR"))
+
+    if strict and not any(name.startswith(prefix) for prefix in valid_prefixes):
+        report.append(("Missing valid prefix (T_ or TEX_)", name, "WARNING"))
 
     return report
 

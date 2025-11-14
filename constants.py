@@ -36,6 +36,15 @@ section_aliases = {
     "Modifier": "Modifiers",
     "Modifiers": "Modifiers",
     "Normals": "Geometry",
+    "Bone Count": "Rigging",
+    "Bone Naming OK": "Rigging",
+    "Hierarchy": "Rigging",
+    "Naming Convention": "Rigging",
+    "Blacklisted Bone Names": "Rigging",
+    "Constraints Present": "Rigging",
+    "Drivers Present": "Rigging",
+    "Unassigned Verts": "Rigging",
+    "Rigging Context": "Rigging"
 }
 
 valid_prefixes = ["T_", "TEX_"]
@@ -59,6 +68,14 @@ banned_patterns = ["default*", "material*", "texture*",
     "temp*", "test*", "preview*", "render*", "output*",
     "copy*", "duplicate*", "backup*", "old*", "new*"
 ]
+
+allowed_prefixes = (
+    "DEF-", "CTRL-", "MCH-", "VIS-", "TGT-"
+)
+
+blacklist_patterns = {
+    "Bone*", "Joint*", "Temp*", "Unnamed*", "Helper*"
+}
 
 TEXEL_DENSITY_RANGE = (3, 12)
 TEXEL_DENSITY_MIN_AAA = 12

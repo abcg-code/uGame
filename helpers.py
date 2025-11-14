@@ -218,3 +218,47 @@ def is_uv_layout_stacked(uvs, threshold=0.1):
     unique_uvs = set((round(u, 5), round(v, 5)) for u, v in uvs)
     return len(unique_uvs) / len(uvs) < threshold
     
+def dispatch_checks(obj, settings):
+    from .checks import (
+        check_geometry,
+        check_object_modifiers,
+        check_uvs,
+        check_textures,
+        check_rigging
+    )
+
+    report = []
+
+    if obj.type == 'ARMATURE':
+        return []
+
+    if obj.type == 'MESH':
+        report.extend(check_geometry(obj, settings))
+        report.extend(check_object_modifiers(obj))
+        report.extend(check_uvs(obj))
+        report.extend(check_textures(obj))
+
+        if any(mod.type == 'ARMATURE' for mod in obj.modifiers):
+            report.extend(check_rigging(obj))
+
+        return report
+
+    return [("Other", f"Skipped unsupported type: {obj.type}", "INFO")]
+
+def infer_section_from_label(label):
+    if label.startswith("Missing Texture Map:") or label.startswith("["):
+        return "Textures"
+    elif "Modifier" in label or label.startswith("Modifiers"):
+        return "Modifiers"
+    elif "UV" in label or label.startswith("Texel") or label.startswith("Unwrapping"):
+        return "UVs"
+    elif "Bone" in label or "Rigging" in label or "Constraints" in label or "Drivers" in label or "Unassigned Verts" in label:
+        return "Rigging"
+    elif label in {
+        "Vertex Count", "Face Count", "Edge Count", "N-gons", "Non-Manifold Edges",
+        "Stray Vertices", "Transforms Applied", "Unapplied Transforms", "Normals", "Double Vertices"
+    }:
+        return "Geometry"
+    else:
+        return "Other"
+

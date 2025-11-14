@@ -22,12 +22,7 @@ along with this program; if not, see https://www.gnu.org/licenses.
 
 import bpy
 from .helpers import (
-    is_location_applied,
-    get_top_parent,
-    get_transform_status,
-    get_island_texel_densities,
-    get_uv_utilization,
-    get_uv_bounds,
+    get_uv_bounds
 )
 
 from .checks import (
@@ -124,4 +119,3 @@ def get_collection_uv_utilization(collection):
     level = "INFO" if utilization >= 90 else "WARNING"
     report.append(("UV Space Utilization", f"{utilization}%", level))
     return report
-

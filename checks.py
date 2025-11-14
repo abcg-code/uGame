@@ -28,12 +28,9 @@ from collections import defaultdict
 from .helpers import (
     is_location_applied,
     get_top_parent,
-    get_transform_status,
     get_island_texel_densities,
     get_uv_utilization,
-    get_uv_bounds,
     get_all_objects_recursive,
-    calculate_uv_area,
     count_uv_islands,
     get_total_uv_and_face_area,
     is_uv_layout_stacked
@@ -41,17 +38,16 @@ from .helpers import (
 from .constants import (
     required_maps,
     optional_maps,
+    allowed_prefixes,
+    blacklist_patterns,
     TEXEL_DENSITY_RANGE,
     TEXEL_DENSITY_MIN_AAA,
     TEXEL_DENSITY_DEVIATION_THRESHOLD,
-    UV_UTILIZATION_MIN
 )
 from .texture_checks import (
-    check_texture_filename,
-    check_texture_suffix,
+    check_texture_naming,
     check_texture_resolution,
     is_node_connected,
-    infer_map_type,
     get_clean_map_type
 )
 
@@ -85,30 +81,21 @@ def check_collection_transforms(collection):
 
     report.append((collection.name, f"Checked {len(objects)} objects across nested collections", "INFO"))
 
-    scale_ok = []
-    rotation_ok = []
-    location_ok = []
+    unapplied_types = set()
 
     for obj in objects:
         top = get_top_parent(obj)
-        scale_ok.append(all(val == 1.0 for val in top.scale))
-        rotation_ok.append(all(val == 0.0 for val in top.rotation_euler))
-        location_ok.append(is_location_applied(top))
+        if not all(val == 1.0 for val in top.scale):
+            unapplied_types.add("Scale")
+        if not all(val == 0.0 for val in top.rotation_euler):
+            unapplied_types.add("Rotation")
+        if not is_location_applied(top):
+            unapplied_types.add("Location")
         
-    if all(scale_ok):
-        report.append((collection.name, "All objects have scale applied", "INFO"))
+    if unapplied_types:
+        report.append(("Unapplied Transforms", f"{', '.join(sorted(unapplied_types))}", "ERROR"))
     else:
-        report.append((collection.name, "Some objects have unapplied scale", "WARNING"))
-
-    if all(rotation_ok):
-        report.append((collection.name, "All objects have rotation applied", "INFO"))
-    else:
-        report.append((collection.name, "Some objects have unapplied rotation", "WARNING"))
-
-    if all(location_ok):
-        report.append((collection.name, "All objects have valid location", "INFO"))
-    else:
-        report.append((collection.name, "At least one object has invalid location", "WARNING"))
+        report.append(("Transforms Applied", "OK", "INFO"))
 
     return report
 
@@ -247,7 +234,7 @@ def check_uvs(obj):
     report = []
 
     if obj.type != 'MESH':
-        return []
+        return [("UVs", "Not a mesh object", "INFO")]
 
     if bpy.context.mode != 'OBJECT':
         bpy.ops.object.mode_set(mode='OBJECT')
@@ -261,92 +248,102 @@ def check_uvs(obj):
     uv_unwrapped = bool(mesh.uv_layers)
     seams_exist = any(edge.use_seam for edge in mesh.edges)
 
-    report.append(("UV Unwrapped", str(uv_unwrapped), "INFO" if uv_unwrapped else "ERROR"))
-    report.append(("Marked Seams", "Found" if seams_exist else "None",  "INFO" if seams_exist else "ERROR"))
+    # Unwrap/seams
+    if not uv_unwrapped:
+        report.append(("UVs", "Mesh not unwrapped", "ERROR"))
+    else:
+        report.append(("UV Unwrapped", "True", "INFO"))
+
+    if not seams_exist:
+        report.append(("Marked Seams", "None", "ERROR"))
+    else:
+        report.append(("Marked Seams", "Found", "INFO"))
 
     if not mesh.uv_layers.active:
         report.append(("UV Layer", "No active UV layer found", "ERROR"))
         return report
 
+    # Islands
     uv_islands = count_uv_islands(obj)
     is_simple_mesh = len(mesh.polygons) < 100 and len(mesh.vertices) < 150
-    
     if uv_islands == 1 and is_simple_mesh:
         report.append(("UV Island Count", f"{uv_islands} island (simple mesh)", "INFO"))
     else:
-        threshold = 50 if settings.is_hero_asset else 25
+        threshold = 200 if settings.is_hero_asset else 100
         if uv_islands > threshold:
-            level = "ERROR"
+            report.append(("UV Island Count", f"{uv_islands} islands", "ERROR"))
         elif uv_islands > threshold * 0.75:
-            level = "WARNING"
+            report.append(("UV Island Count", f"{uv_islands} islands", "WARNING"))
         else:
-            level = "INFO"
-        report.append(("UV Island Count", f"{uv_islands} islands", level))
+            report.append(("UV Island Count", f"{uv_islands} islands", "INFO"))
 
+    # Utilization
     utilization, overflow, uvs = get_uv_utilization(obj)
-    unique_uvs = set((round(u, 5), round(v, 5)) for u, v in uvs) if uvs else set()
-    unique_ratio = len(unique_uvs) / len(uvs) if uvs else 0
+    if utilization == 0.0 and len(uvs) > 0:
+        report.append(("UV Space Utilization", "UVs exist, but layout collapsed/invalid", "WARNING"))
+    elif overflow:
+        report.append(("UV Space Utilization", f"{utilization}% (UVs exceed 0-1 space)", "ERROR"))
+    elif utilization >= pass_threshold:
+        report.append(("Uv Space Utilization", f"{utilization}%", "INFO"))
+    elif utilization >= target -5:
+        report.append(("UV Space Utilization", f"{utilization}% (suboptimal)", "WARNING"))
+    else:
+        report.append(("UV Space Utilization", f"{utilization}% (too low)", "ERROR"))
 
+    # Color atlas detection
     texture_map_names = [slot.name for slot in obj.material_slots if slot.material]
     has_normal = "Normal" in texture_map_names
     has_roughness = "Roughness" in texture_map_names
 
     atlas_score = 0
-    if utilization < 10.0: atlas_score += 1
+    if utilization < 15.0: atlas_score += 1
+    unique_uvs = set((round(u, 5), round(v, 5)) for u, v in uvs) if uvs else set()
+    unique_ratio = len(unique_uvs) / len(uvs) if uvs else 0
     if unique_ratio < 0.1: atlas_score += 1
     if not has_normal: atlas_score += 1
     if not has_roughness: atlas_score += 1
-    if uv_islands < 10: atlas_score += 1
+    if uv_islands < 15: atlas_score += 1
     if not seams_exist: atlas_score += 1
 
     is_color_atlas = atlas_score >= 5
-
     if is_color_atlas:
-        report.append(("UV Strategy", f"Color atlas confidence: {atlas_score}/6", "INFO" if is_color_atlas else "WARNING"))
+        report.append(("UV Strategy", f"Color atlas confidence: {atlas_score}/6", "INFO"))
 
+    # Texel density
     if uv_unwrapped and not is_color_atlas:
         total_uv_area, total_face_area = get_total_uv_and_face_area(obj)
         ratio = round(total_uv_area / total_face_area, 2) if total_face_area > 0 else 0
-        passed = ratio >= TEXEL_DENSITY_MIN_AAA if aaa_mode else TEXEL_DENSITY_RANGE[0] <= ratio <= TEXEL_DENSITY_RANGE[1]
-        report.append(("Texel Density Ratio (px/cm)", str(ratio), "INFO" if passed else "WARNING"))
-
         avg_density, deviation = get_island_texel_densities(obj)
-        report.append(("Texel Density Avg", f"{round(avg_density, 2)}", "INFO"))
-        report.append(("Texel Density Deviation", f"{round(deviation, 2)}", "WARNING" if deviation > TEXEL_DENSITY_DEVIATION_THRESHOLD * avg_density else "INFO"))
+
+        passed = ratio >= TEXEL_DENSITY_MIN_AAA if aaa_mode else TEXEL_DENSITY_RANGE[0] <= ratio <= TEXEL_DENSITY_RANGE[1]
+        report.append(("Texel Density Ratio", f"{ratio:.2f} px/cm", "INFO" if passed else "WARNING"))
+        report.append(("Texel Density Avg", f"{avg_density:.2f}", "INFO"))
+        report.append(("Texel Density Deviation", f"{deviation:.2f}", "WARNING" if deviation > TEXEL_DENSITY_DEVIATION_THRESHOLD * avg_density else "INFO"))
 
         if is_uv_layout_stacked(uvs):
             level = "ERROR" if settings.is_hero_asset else "WARNING"
             report.append(("UV Layout", "Majority of UVs are stacked or overlapping", level))
 
-    if utilization == 0.0 and len(uvs) > 0:
-        report.append(("UV Space Utilization", "UVs exist, but layout is collapsed or invalid", "WARNING"))
-    elif overflow:
-        report.append(("UV Space Utilization", f"{utilization}% (UVs exceed 0-1 space)", "ERROR"))
-    elif utilization >= pass_threshold:
-        report.append(("UV Space Utilization", f"{utilization}%", "INFO"))
-    elif utilization >= target - 5:
-        report.append(("UV Space Utilization", f"{utilization}% (suboptimal)", "WARNING"))
-    else:
-        report.append(("UV Space Utilization", f"{utilization}% (too low)", "ERROR"))
+        # Smart UV detection
+        smart_uv = uv_islands > 50 and not seams_exist
+        poor_density = ratio < 0.5 or deviation > TEXEL_DENSITY_DEVIATION_THRESHOLD * avg_density
+        level = "ERROR" if settings.is_hero_asset else "WARNING"
+
+        if smart_uv and poor_density:
+            report.append(("Unwrapping Quality", "Likely Smart UV Project with poor texel density", level))
+        elif smart_uv:
+            report.append(("Unwrapping Quality", "Likely Smart UV Project", level))
+        elif uv_islands < 2:
+            report.append(("Unwrapping Quality", "Likely default UVs", "ERROR"))
+        else:
+            report.append(("Unwrapping Quality", "Seams detected, unwrap appears manual", "INFO"))
 
     if aaa_mode:
         report.append(("AAA Target", "UV Utilization should be ~90%", "INFO"))
 
-    if uv_unwrapped and not seams_exist and not is_color_atlas:
-        smart_uv = uv_islands > 50
-        poor_density = ratio < 0.5 or deviation > TEXEL_DENSITY_DEVIATION_THRESHOLD * avg_density
-        level = "ERROR" if settings.is_hero_asset else "WARNING"
-
-        if smart_uv and poor_density:    
-            report.append(("Unwrapping Quality", "Likely Smart UV Project with poor texel density", level))
-        elif smart_uv:
-            report.append(("Unwrapping Quality", "Likely Smart UV Project", level))
-        else:
-            report.append(("Unwrapping Quality", "Likely default UVs", "ERROR"))
-
     return report
 
-def check_textures(obj):
+def check_textures(obj, is_color_atlas=False):
     report = []
     used_images = set()
     found_maps = set()
@@ -366,7 +363,7 @@ def check_textures(obj):
             img = node.image
             used_images.add(img)
 
-            for check_fn in [check_texture_filename, check_texture_suffix,check_texture_resolution]:
+            for check_fn in [check_texture_naming, check_texture_resolution]:
                 arg = strict if check_fn != check_texture_resolution else is_hero_asset
                 for label, value, level in check_fn(img, arg):
                     report.append((f"[{img.name}] {label}", "", level))
@@ -382,17 +379,18 @@ def check_textures(obj):
             if not is_node_connected(node):
                 report.append((f"[{mat.name}] Image node not connected", img.name, "WARNING"))
 
-    for map_type in required_maps:
-        if map_type not in found_maps:
-            if map_type == "Roughness":
-                level = "ERROR" if is_hero_asset else "WARNING"
-                report.append((f"Missing Texture Map: {map_type}", "Not found", level))
-            else:
-                report.append((f"Missing Texture Map: {map_type}", "Not found", "ERROR"))
+    if not is_color_atlas:
+        for map_type in required_maps:
+            if map_type not in found_maps:
+                if map_type == "Roughness":
+                    level = "ERROR" if is_hero_asset else "WARNING"
+                    report.append((f"Missing Texture Map: {map_type}", "Not found", level))
+                else:
+                    report.append((f"Missing Texture Map: {map_type}", "Not found", "ERROR"))
 
-    missing_optional = [m for m in optional_maps if m not in found_maps]
-    if missing_optional:
-        report.append((f"Optional Maps", "Missing: " + ", ".join(missing_optional), "WARNING"))
+        missing_optional = [m for m in optional_maps if m not in found_maps]
+        if missing_optional:
+            report.append((f"Optional Maps", "Missing: " + ", ".join(missing_optional), "WARNING"))
 
     if found_maps:
         summary = ", ".join(sorted(found_maps))
@@ -406,47 +404,44 @@ def check_rigging(obj):
     if bpy.context.mode != 'OBJECT':
         bpy.ops.object.mode_set(mode='OBJECT')
 
-    if obj.type != 'ARMATURE':
-        report.append(("Rigging Check", "Not an armature object", "INFO"))
-        return report
+    if obj.type != 'MESH':
+        return [("Rigging", "Not a mesh object", "INFO")]
 
-    bones = obj.data.bones
-    pose_bones = obj.pose.bones if obj.pose else []
+    armature_mod = next((m for m in obj.modifiers if m.type == 'ARMATURE'), None)
+    if not armature_mod or not armature_mod.object:
+        return [("Rigging", "No armature linked", "INFO")]
 
-    bone_names_ok = all(b.name.isidentifier() for b in bones)
-    hierarchy_ok = all(b.parent != b for b in bones if b.parent)
-
-    report.append(("Bone Naming OK", str(bone_names_ok), "ERROR" if not bone_names_ok else "INFO"))
-    report.append(("Hierarchy Clean", str(hierarchy_ok), "ERROR" if not hierarchy_ok else "INFO"))
+    armature = armature_mod.object
+    bones = armature.data.bones
+    pose_bones = armature.pose.bones if armature.pose else []
 
     bone_count = len(bones)
     report.append(("Bone Count", str(bone_count), "INFO" if bone_count > 0 else "ERROR"))
 
-    allowed_prefixes = ("DEF-", "CTRL-", "MCH-", "VIS-", "TGT-")
-    non_conforming = [b.name for b in bones if not b.name.startswith(allowed_prefixes)]
-    if non_conforming:
-        report.append(("Naming Convention", f"{len(non_conforming)} bones not using DEF-/CTRL-/VIS-/TGT-", "ERROR"))
-
-    blacklist_patterns = {"Bone*", "Joint*", "Temp*", "Unnamed*", "Helper*"}
+    non_conforming = [b.name for b in bones if not b.name.startswith(allowed_prefixes)]   
     blacklisted = [b.name for b in bones if any(fnmatch.fnmatch(b.name, pattern) for pattern in blacklist_patterns)]
 
+    naming_issues = []
     if blacklisted:
-        report.append(("Blacklisted Bone Names", ", ".join(blacklisted), "ERROR"))
+        naming_issues.append(f"Blacklisted: {', '.join(blacklisted)}")
+    if non_conforming:
+        naming_issues.append(f"Missing prefix: {len(non_conforming)} bones")
 
-    mesh_objs = [
-        o for o in bpy.data.objects
-        if o.type == 'MESH' and any(
-            m.type == 'ARMATURE' and m.object == obj for m in o.modifiers
-        )
-    ]
+    if naming_issues:
+        report.append(("Bone Naming", ", ".join(naming_issues), "ERROR"))
+    else:
+        report.append(("Bone Naming", "OK", "INFO"))
 
-    for mesh in mesh_objs:
-        unassigned = sum(1 for v in mesh.data.vertices if not v.groups)
-        report.append((f"{mesh.name} - Unassigned Verts", str(unassigned), "INFO" if unassigned == 0 else "ERROR"))
+    hierarchy_ok = all(b.parent != b for b in bones if b.parent)
+    report.append(("Hierarchy Clean", str(hierarchy_ok), "ERROR" if not hierarchy_ok else "INFO"))
 
-    has_constraints = any(c for b in obj.pose.bones for c in b.constraints)
-    has_drivers = bool(obj.animation_data and obj.animation_data.drivers)
+    unassigned = sum(1 for v in obj.data.vertices if not v.groups)
+    report.append((f"{obj.name} - Unassigned Verts", str(unassigned), "INFO" if unassigned == 0 else "ERROR"))
+
+    has_constraints = any(c for b in pose_bones for c in b.constraints)
+    has_drivers = bool(armature.animation_data and armature.animation_data.drivers)
     report.append(("Constraints Present", str(has_constraints), "INFO" if not has_constraints else "WARNING"))
     report.append(("Drivers Present", str(has_drivers), "INFO" if not has_drivers else "WARNING"))
 
     return report
+

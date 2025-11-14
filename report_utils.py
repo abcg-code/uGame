@@ -21,202 +21,238 @@ along with this program; if not, see https://www.gnu.org/licenses.
 '''
 
 import bpy
-import textwrap
+import os
 from collections import defaultdict
 from .checks import (
     check_collection_structure,
-    check_collection_transforms,
-    check_geometry,
-    check_textures,
-    check_uvs,
-    check_object_modifiers,
-    check_rigging
+    check_collection_transforms
 )
-from .constants import section_aliases
-from .utils import (
-    get_collection_uv_utilization,
-    collect_object_sections
+from .constants import (
+    section_aliases
 )
 
-def build_section_summary_line(section, issue_labels, width=150):
-    prefix = f"[SUMMARY] {section}: FAIL (Issues: "
+from .utils import (
+    get_collection_uv_utilization
+)
+from .helpers import (
+    dispatch_checks,
+    infer_section_from_label
+)
+from .texture_checks import (
+    get_clean_map_type,
+    get_clean_name
+)
+def normalize_section(section):
+    return section_aliases.get(section, section)
+
+def build_asset_summary_line(category, issues, status="FAIL", width=150):
+    prefix = f"ASSET : {category} | {status} ("
     indent = " " * len(prefix)
     lines = []
     line = prefix
     current_length = len(line)
 
-    for i, label in enumerate(issue_labels):
-        label_text = label + (", " if i < len(issue_labels) - 1 else "")
-        if current_length + len(label_text) > width:
+    for i, issue in enumerate(issues):
+        issue_text = issue + (", " if i < len(issues) - 1 else "")
+        if current_length + len(issue_text) > width:
             lines.append(line.rstrip(", "))
-            line = indent + label_text
+            line = indent + issue_text
             current_length = len(line)
         else:
-            line += label_text
-            current_length += len(label_text)
+            line += issue_text
+            current_length += len(issue_text)
 
-    if current_length + 1 > width:
-        lines.append(line.rstrip(", "))
-        lines.append(indent + ")")
-    else:
-        line += ")"
-        lines.append(line)
+    line += ")"
+    lines.append(line)
     return lines
 
-def normalize_section(section):
-    return section_aliases.get(section, section)
+def format_error(label, value):
+    return f"{label} ({value})" if value and value != "None found" else label
 
-def extract_failures(obj_sections):
-    failures = {}
-    for section, items in obj_sections.items():
-        normalized = normalize_section(section)
-        for item in items:
-            if len(item) == 3 and item[2] == "ERROR":
-                if normalized == "Textures":
-                    reason, texture_name, _ = item
-                    failures.setdefault(normalized, []).append((reason, texture_name))
-                else:
-                    label, _, _ = item
-                    failures.setdefault(normalized, []).append(str(label))
-    
-    return failures
+def extract_errors(section_items, group_by_label=False, prefix_filter=None):
+    grouped = defaultdict(list)
+    results = []
+    for label, value, level in section_items:
+        if level == "ERROR" and (not prefix_filter or label.startswith(prefix_filter)):
+            if group_by_label:
+                grouped[label].append(value)
+            else:
+                results.append(format_error(label, value))
+    if group_by_label:
+        return [f"{label}: ({', '.join(sorted(set(values)))})" for label, values in grouped.items()]
+    return sorted(results)
 
 def collect_report_data(objects, settings):
     report_data = {}
-
     for obj in objects:
-        obj_name = obj.name
-        report_data[obj_name] = {}
+        flat_report = dispatch_checks(obj, settings)
+        sectioned = defaultdict(list)
 
-        geo = check_geometry(obj, settings)
-        geo_issues = [item for item in geo if item[2] == "ERROR"]
-        if geo_issues:
-            report_data[obj_name]["Geometry"] = geo_issues
-
-        tex = check_textures(obj)
-        tex_issues = [item for item in tex if item[2] == "ERROR"]
-        if tex_issues:
-            report_data[obj_name]["Textures"] = tex_issues
-
-        uvs = check_uvs(obj)
-        uv_issues = [item for item in uvs if item[2] == "ERROR"]
-        if uv_issues:
-            report_data[obj_name]["UVs"] = uv_issues
-
-        mod = check_object_modifiers(obj)
-        mod_issues = [item for item in mod if item[2] == "ERROR"]
-        if mod_issues:
-            report_data[obj_name]["Modifiers"] = mod_issues
-
-        rig = check_rigging(obj)
-        rig_issues = [item for item in rig if item[2] == "ERROR"]
-        if rig_issues:
-            report_data[obj_name]["Rigging"] = rig_issues
-
+        for item in flat_report:
+            if isinstance(item, tuple) and len(item) == 3:
+                label, value, level = item
+                raw_section = infer_section_from_label(label)
+                section = normalize_section(raw_section)
+                sectioned[section].append((label, value, level))
+            else:
+                sectioned["Other"].append(item)
+        report_data[obj.name] = dict(sectioned)
     return report_data
 
-def build_final_summary(report_data, width=150):
-    summary_lines = []
-    section_order = ["Geometry", "Texture", "Missing Texture Map", "UVs", "Modifiers", "Rigging"]
+def summarize_texture_errors(items):
+    grouped = {}
+    total_maps = 0
 
-    for obj_name, issues in report_data.items():
-        parts = []
-
-        if "Geometry" in issues:
-            geo_labels = sorted([
-                f"{label.strip()} ({value})" if value and value != "None found" else label.strip()
-                for label, value, level in issues["Geometry"]
-                if level == "ERROR"
-            ])
-            if geo_labels:
-                parts.append(("Geometry", geo_labels))
-
-        if "Textures" in issues:
-            texture_errors = defaultdict(list)
-            for label, _, level in issues["Textures"]:
-                if level == "ERROR" and not label.startswith("Missing Texture Map:"):
-                    if label.startswith("[") and "]" in label:
-                        tex_name = label.split("]")[0][1:]
-                        tex_issue = label.split("]")[1].strip()
-                        texture_errors[tex_name].append(tex_issue)
-
-            tex_labels = [
-                f"[{tex_name}] " + ", ".join(sorted(problems))
-                for tex_name, problems in sorted(texture_errors.items())
-            ]
-            if tex_labels:
-                parts.append(("Texture", tex_labels))
-
-            missing_maps = sorted(set([
-                label.split(": ")[-1]
-                for label, _, level in issues["Textures"]
-                if level == "ERROR" and label.startswith("Missing Texture Map:")
-            ]))
-            if missing_maps:
-                parts.append((f"Missing Texture Map", (missing_maps)))
-
-        if "UVs" in issues:
-            uv_labels = sorted([label for label, _, _ in issues["UVs"]])
-            parts.append(("UVs", uv_labels))
-
-        if "Modifiers" in issues:
-            mod_labels = sorted([label.replace("Modifier: ", "") for label, _, _ in issues["Modifiers"]])
-            parts.append(("Modifiers", mod_labels))
-
-        if "Rigging" in issues:
-            rig_labels = sorted([label for label, _, _ in issues["Rigging"]])
-            parts.append(("Rigging", rig_labels))
-
-        if not parts:
+    for label, value, level in items:
+        if level != "ERROR":
             continue
 
-        parts.sort(key=lambda x: section_order.index(x[0]) if x[0] in section_order else 99)
+        reason = label
+        if "]" in reason:
+            reason = reason.split("]")[-1].strip()
+        if reason.endswith(":"):
+            reason = reason[:-1].strip()
+
         
-        prefix = f"- {obj_name}: "
-        indent = " " * len(prefix)
-        object_lines = []
-        line = prefix
-        current_length = len(line)
+        filename = value if value else label
+        fake_img = type("FakeImg", (), {"name": filename})()
+        map_type = get_clean_map_type(fake_img)
+        if not map_type:
+            map_type = get_clean_name(fake_img)
+        
+        grouped.setdefault(reason, []).append(map_type)
+        total_maps += 1
 
-        for section_index, (section, labels) in enumerate(parts):
-            labels = [label for label in labels if label.strip()]
-            section_text = f"| [{section} ({len(labels)})] ["
-            continuation_indent = indent + " " * len(section_text)
+    summaries = []
+    for reason, maps in grouped.items():
+        summaries.append(f"{reason}: {', '.join(sorted(set(maps)))}")
+    return summaries, total_maps
 
-            if section_index > 0:
-                object_lines.append(line.rstrip(", "))
-                line = indent + section_text
-                current_length = len(line)
+def build_final_summary(report_data, width=150, collection_utilization=None,
+                        asset_collection_mode=False, active_object_mode=False,
+                        scan_single=False, scan_collection=False, scan_file=False):
+    summary_lines = []
+    multi_object_asset = len(report_data) > 1 and not asset_collection_mode and not active_object_mode
+
+    settings = bpy.context.scene.ugame_settings
+    aaa_mode = settings.aaa_game_check
+    target = 90.0 if aaa_mode else 80.0
+    pass_threshold = 85.0 if aaa_mode else 70.0
+
+    if multi_object_asset and (scan_collection or scan_file):
+        if collection_utilization is not None:
+            if collection_utilization >= pass_threshold:
+                uv_status = f"UV Space Utilization (Collection: {collection_utilization:.2f}%)"
+                status = "PASS"
+            elif collection_utilization >= target - 5:
+                uv_status = f"UV Space Utilization (Collection: {collection_utilization:.2f}% (suboptimal))"
+                status = "WARNING"
             else:
-                line += section_text
-                current_length = len(section_text)
+                uv_status = f"UV Space Utilization (Collection: {collection_utilization:.2f}% (too low))"
+                status = "FAIL"
+            if status in ("WARNING", "FAIL"):
+                summary_lines.append(
+                    f"ASSET  : {settings.selected_collection.name if settings.selected_collection else 'File'} "
+                    f"| [UVs], {status} ({uv_status})"
+                )
 
-            for i, label in enumerate(labels):
-                label_text = label + (", " if i < len(labels) -1 else "")
-                if i == 0 or current_length + len(label_text) <= width:
-                    line += label_text
-                    current_length += len(label_text)
+        consolidated_textures = []
+        for issues in report_data.values():
+            if "Textures" not in issues:
+                continue
+            missing_maps = extract_errors(
+                issues["Textures"], group_by_label=True, prefix_filter="Missing Texture Map:"
+            )
+            consolidated_textures.extend(missing_maps)
+        if consolidated_textures:
+            summary_lines.extend(build_asset_summary_line("Textures", consolidated_textures, width=width))
+
+        for obj_name, issues in report_data.items():
+            for section, items in issues.items():
+                if section == "UVs":
+                    continue
+                errors = extract_errors(items, group_by_label=True if section == "Modifiers" else False)
+                if not errors:
+                    continue
+
+                if section == "Modifiers":
+                    if not errors:
+                        continue
+                    disallowed = []
+                    for label in errors:
+                        clean = label.replace("Modifier:", "").replace("Modifiers:", "")
+                        clean = clean.replace("(Disallowed type:", "").replace(")", "")
+                        clean = clean.strip()
+                        parts = [p.strip() for p in clean.split(":") if p.strip()]
+                        if len(parts) > 1:
+                            clean = parts[0]
+                        elif parts:
+                            clean = parts[0]
+                        disallowed.append(clean)
+                    section_text = f"[{section} ({len(errors)})], Disallowed type: {', '.join(disallowed)}"
+                    
+                elif section == "Textures":
+                    if not errors:
+                        continue
+                    summaries, total_maps = summarize_texture_errors(items)
+                    if summaries:
+                        section_text = f"[{section} ({total_maps})], " + " | ".join(summaries)
+                        summary_lines.append(f"OBJECT : {obj_name.ljust(12)} | {section_text}")
                 else:
-                    object_lines.append(line.rstrip(", "))
-                    line = continuation_indent + label_text
-                    current_length = len(line)
+                    section_text = f"[{section} ({len(errors)})], {', '.join(errors)}"
+                    summary_lines.append(f"OBJECT : {obj_name.ljust(12)} | {section_text}")
 
-            line += "] "
-            current_length += 1
+    else:
+        for obj_name, issues in report_data.items():
+            for section, items in issues.items():
+                errors = extract_errors(items, group_by_label=True if section == "Modifiers" else False)
+                if not errors and section != "Modifiers" and section != "Textures":
+                    continue
 
-        object_lines.append(line.rstrip(", "))
-        summary_lines.extend(object_lines)
+                if section == "Modifiers":
+                    if not errors:
+                        continue
+                    disallowed = []
+                    for label in errors:
+                        clean = label.replace("Modifier:", "").replace("Modifiers:", "")
+                        clean = clean.replace("(Disallowed type:", "").replace(")", "")
+                        clean = clean.strip()
+                        parts = [p.strip() for p in clean.split(":") if p.strip()]
+                        if len(parts) > 1:
+                            clean = parts[0]
+                        elif parts:
+                            clean = parts[0]
+                        disallowed.append(clean)
+                    section_text = f"[{section} ({len(errors)})], Disallowed type: {', '.join(disallowed)}"
+                elif section == "Textures":
+                    if not errors:
+                        continue
+                    summaries, total_maps = summarize_texture_errors(items)
+                    if summaries:
+                        section_text = f"[{section} ({total_maps})], " + " | ".join(summaries)
+                        summary_lines.append(f"OBJECT : {obj_name.ljust(12)} | {section_text}")
+                else:
+                    section_text = f"[{section} ({len(errors)})], {', '.join(errors)}"
+                    summary_lines.append(f"OBJECT : {obj_name.ljust(12)} | {section_text}")
     
     return "\n".join(summary_lines)
 
 def build_detailed_report(objects):
     lines = ["\n\n[Per-Object Detail]\n==================="]
-
     for obj in objects:
-        obj_sections = collect_object_sections(obj)
+        flat_report = dispatch_checks(obj, bpy.context.scene.ugame_settings)
+        sectioned = defaultdict(list)
+        for item in flat_report:
+            if isinstance(item, tuple) and len(item) == 3:
+                label, value, level = item
+                raw_section = infer_section_from_label(label)
+                section = normalize_section(raw_section)
+                sectioned[section].append((label, value, level))
+            else:
+                sectioned["Other"].append(item)
+        obj_sections = dict(sectioned)
         detail_lines = build_per_object_detail(obj.name, obj_sections)
         lines.extend(detail_lines)
-
     return "\n".join(lines)
 
 def build_per_object_detail(obj_name, obj_sections, settings=None):
@@ -224,10 +260,10 @@ def build_per_object_detail(obj_name, obj_sections, settings=None):
     header = f"Object: {obj_name}"
     lines.append(f"\n{'=' * len(header)}\n{header}\n{'=' * len(header)}\n")
 
-    normalized_sections = {
-        normalize_section(k): v for k, v in obj_sections.items()
-    }
-
+    normalized_sections = defaultdict(list)
+    for raw_section, items in obj_sections.items():
+        normalized = normalize_section(raw_section)
+        normalized_sections[normalized].extend(items)
     expected_sections = ["Geometry", "Textures", "UVs", "Modifiers", "Rigging"]
 
     for section in expected_sections:
@@ -263,7 +299,7 @@ def build_per_object_detail(obj_name, obj_sections, settings=None):
                 cleaned_errors.append(label)
         
         if cleaned_errors:
-            for line in build_section_summary_line(section, sorted(set(cleaned_errors))):
+            for line in build_asset_summary_line(section, sorted(set(cleaned_errors))):
                 lines.append(line + "\n")
         else:
             summary = f"[SUMMARY] {section}: PASS"
