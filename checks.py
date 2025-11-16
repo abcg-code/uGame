@@ -365,8 +365,8 @@ def check_textures(obj, is_color_atlas=False):
 
             for check_fn in [check_texture_naming, check_texture_resolution]:
                 arg = strict if check_fn != check_texture_resolution else is_hero_asset
-                for label, value, level in check_fn(img, arg):
-                    report.append((f"[{img.name}] {label}", "", level))
+                for reason, map_name, level in check_fn(img, arg):
+                    report.append((reason, map_name, level))
             
             if img.source == 'TILED':
                 tile_count = len(img.tiles)
@@ -384,9 +384,9 @@ def check_textures(obj, is_color_atlas=False):
             if map_type not in found_maps:
                 if map_type == "Roughness":
                     level = "ERROR" if is_hero_asset else "WARNING"
-                    report.append((f"Missing Texture Map: {map_type}", "Not found", level))
+                    report.append((f"Missing Texture Map", map_type, level))
                 else:
-                    report.append((f"Missing Texture Map: {map_type}", "Not found", "ERROR"))
+                    report.append((f"Missing Texture Map", map_type, "ERROR"))
 
         missing_optional = [m for m in optional_maps if m not in found_maps]
         if missing_optional:

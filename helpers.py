@@ -245,20 +245,36 @@ def dispatch_checks(obj, settings):
 
     return [("Other", f"Skipped unsupported type: {obj.type}", "INFO")]
 
-def infer_section_from_label(label):
-    if label.startswith("Missing Texture Map:") or label.startswith("["):
+def infer_section_from_label(label: str) -> str:
+    if (
+        label.startswith("Texture")
+        or label.startswith("Missing Texture Map")
+        or label.startswith("Optional Maps")
+        or label.startswith("Found Texture Maps")
+        or "Resolution" in label
+        or "power-of-two" in label
+    ):
         return "Textures"
-    elif "Modifier" in label or label.startswith("Modifiers"):
+
+    if "Modifier" in label or label.startswith("Modifiers"):
         return "Modifiers"
-    elif "UV" in label or label.startswith("Texel") or label.startswith("Unwrapping"):
+
+    if "UV" in label or label.startswith("Texel") or label.startswith("Unwrapping"):
         return "UVs"
-    elif "Bone" in label or "Rigging" in label or "Constraints" in label or "Drivers" in label or "Unassigned Verts" in label:
+
+    if ("Bone" in label
+        or "Rigging" in label
+        or "Constraints" in label
+        or "Drivers" in label
+        or "Unassigned Verts" in label
+    ):
         return "Rigging"
-    elif label in {
+    
+    if label in {
         "Vertex Count", "Face Count", "Edge Count", "N-gons", "Non-Manifold Edges",
         "Stray Vertices", "Transforms Applied", "Unapplied Transforms", "Normals", "Double Vertices"
     }:
         return "Geometry"
-    else:
-        return "Other"
+  
+    return "Other"
 

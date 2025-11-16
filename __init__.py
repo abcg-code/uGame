@@ -23,7 +23,7 @@ along with this program; if not, see https://www.gnu.org/licenses.
 bl_info = {
     "name": "uGame",
     "author": "Adrian Bellworthy",
-    "version": (1, 0, 5),
+    "version": (1, 0, 6),
     "blender": (4, 5, 0),
     "location": "Topbar",
     "description": "Checks models for game-readiness with customizable settings",

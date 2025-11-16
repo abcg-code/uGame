@@ -51,6 +51,10 @@ class OBJECT_OT_CheckGameReady(bpy.types.Operator):
     def execute(self, context):
         report_lines = []
         settings = context.scene.ugame_settings
+        if settings.scan_selected_collection and not settings.selected_collection:
+            self.report({'WARNING'}, "Please select a collection to scan.")
+            context.window_manager.modal_handler_add(self)
+            return {'RUNNING_MODAL'}
 
         scan_single = settings.scan_single_object
         scan_collection = settings.scan_selected_collection
@@ -72,8 +76,9 @@ class OBJECT_OT_CheckGameReady(bpy.types.Operator):
                 else:
                     objects_to_check = [obj]
             else:
-                self.report({'ERROR'}, "No valid active object selected.")
-                return {'CANCELLED'}
+                self.report({'WARNING'}, "No valid active object selected.")
+                context.window_manager.modal_handler_add(self)
+                return {'RUNNING_MODAL'}
 
         elif scan_file:
             all_objects = [obj for obj in bpy.data.objects if obj.type in {'MESH', 'ARMATURE'}]
@@ -85,8 +90,10 @@ class OBJECT_OT_CheckGameReady(bpy.types.Operator):
 
         elif scan_collection:
             if not selected_collection:
-                self.report({'ERROR'}, "Please select a collection to scan.")
-                return {'CANCELLED'}
+                self.report({'WARNING'}, "Please select a collection to scan.")
+                context.window_manager.modal_handler_add(self)
+                return {'RUNNING_MODAL'}
+
             all_objects = get_all_objects_in_collection(selected_collection)
             for obj in all_objects:
                 if obj.type in {'MESH', 'ARMATURE'}:
@@ -96,12 +103,14 @@ class OBJECT_OT_CheckGameReady(bpy.types.Operator):
                         objects_to_check.append(obj)
 
         else:
-            self.report({'ERROR'}, "No scan mode selected.")
-            return {'CANCELLED'}
+            self.report({'WARNING'}, "No scan mode selected.")
+            context.window_manager.modal_handler_add(self)
+            return {'RUNNING_MODAL'}
 
         if not objects_to_check:
             self.report({'WARNING'}, "No valid objects found to scan.")
-            return {'CANCELLED'}
+            context.window_manager.modal_handler_add(self)
+            return {'RUNNING_MODAL'}
 
         mesh_objects = [obj for obj in objects_to_check if obj.type == 'MESH']
         report_data = collect_report_data(mesh_objects, settings)
@@ -187,6 +196,16 @@ class OBJECT_OT_CheckGameReady(bpy.types.Operator):
         open_report_in_new_window(report_text)
         self.report({'INFO'}, "Game-Ready report opened in new Text Editor window")
         return {'FINISHED'}
+
+    def modal(self, context, event):
+        if event.type in {'ESC', 'RIGHTMOUSE'}:
+            return {'CANCELLED'}
+        if event.type == 'LEFTMOUSE' and event.value == 'PRESS':
+            result = self.execute(context)
+            if result == {'FINISHED'}:
+                return {'FINISHED'}
+            return {'RUNNING_MODAL'}
+        return {'RUNNING_MODAL'}
 
 def register():
     bpy.utils.register_class(OBJECT_OT_CheckGameReady)

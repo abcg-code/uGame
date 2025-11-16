@@ -103,24 +103,10 @@ def summarize_texture_errors(items):
     grouped = {}
     total_maps = 0
 
-    for label, value, level in items:
+    for reason, map_name, level in items:
         if level != "ERROR":
             continue
-
-        reason = label
-        if "]" in reason:
-            reason = reason.split("]")[-1].strip()
-        if reason.endswith(":"):
-            reason = reason[:-1].strip()
-
-        
-        filename = value if value else label
-        fake_img = type("FakeImg", (), {"name": filename})()
-        map_type = get_clean_map_type(fake_img)
-        if not map_type:
-            map_type = get_clean_name(fake_img)
-        
-        grouped.setdefault(reason, []).append(map_type)
+        grouped.setdefault(reason, []).append(map_name)
         total_maps += 1
 
     summaries = []
@@ -138,6 +124,22 @@ def build_final_summary(report_data, width=150, collection_utilization=None,
     aaa_mode = settings.aaa_game_check
     target = 90.0 if aaa_mode else 80.0
     pass_threshold = 85.0 if aaa_mode else 70.0
+
+    def append_wrapped(summary_lines, obj_name, section, errors, width):
+        prefix = f"OBJECT : {obj_name.ljust(12)} | [{section} ({len(errors)})], "
+        indent = " " * len(prefix)
+        current_line = prefix
+        current_length = len(current_line)
+        for i, err in enumerate(errors):
+            err_text = err + (", " if i < len(errors) - 1 else "")
+            if current_length + len(err_text) > width:
+                summary_lines.append(current_line.rstrip(", "))
+                current_line = indent + err_text
+                current_length = len(current_line)
+            else:
+                current_line += err_text
+                current_length += len(err_text)
+        summary_lines.append(current_line.rstrip(" |"))
 
     if multi_object_asset and (scan_collection or scan_file):
         if collection_utilization is not None:
@@ -196,11 +198,26 @@ def build_final_summary(report_data, width=150, collection_utilization=None,
                         continue
                     summaries, total_maps = summarize_texture_errors(items)
                     if summaries:
-                        section_text = f"[{section} ({total_maps})], " + " | ".join(summaries)
-                        summary_lines.append(f"OBJECT : {obj_name.ljust(12)} | {section_text}")
+                        prefix = f"OBJECT : {obj_name.ljust(12)} | [Textures ({total_maps})], "
+                        indent = " " * len(prefix)
+                        current_line = prefix
+                        current_length = len(current_line)
+                        for i, summary in enumerate(summaries):
+                            summary_text = summary + (" | " if i < len(summaries) - 1 else "")
+                            if i == 0:
+                                current_line += summary_text
+                                current_length += len(summary_text)
+                            else:
+                                if current_length + len(summary_text) > width:
+                                    summary_lines.append(current_line.rstrip(" |"))
+                                    current_line = indent + summary_text
+                                    current_length = len(current_line)
+                                else:
+                                    current_line += summary_text
+                                    current_length += len(summary_text)
+                        summary_lines.append(current_line.rstrip(" |"))
                 else:
-                    section_text = f"[{section} ({len(errors)})], {', '.join(errors)}"
-                    summary_lines.append(f"OBJECT : {obj_name.ljust(12)} | {section_text}")
+                    append_wrapped(summary_lines, obj_name, section, errors, width)
 
     else:
         for obj_name, issues in report_data.items():
@@ -229,11 +246,27 @@ def build_final_summary(report_data, width=150, collection_utilization=None,
                         continue
                     summaries, total_maps = summarize_texture_errors(items)
                     if summaries:
-                        section_text = f"[{section} ({total_maps})], " + " | ".join(summaries)
-                        summary_lines.append(f"OBJECT : {obj_name.ljust(12)} | {section_text}")
+                        prefix = f"OBJECT : {obj_name.ljust(12)} | [Textures ({total_maps})], "
+                        indent = " " * len(prefix)
+                        current_line = prefix
+                        current_length = len(current_line)
+                        for i, summary in enumerate(summaries):
+                            summary_text = summary + (" | " if i < len(summaries) - 1 else "")
+                            if i == 0:
+                                current_line += summary_text
+                                current_length += len(summary_text)
+                            else:
+                                if current_length + len(summary_text) > width:
+                                    summary_lines.append(current_line.rstrip(" |"))
+                                    current_line = indent + summary_text
+                                    current_length = len(current_line)
+                                else:
+                                    current_line += summary_text
+                                    current_length += len(summary_text)
+                        summary_lines.append(current_line.rstrip(" |"))
                 else:
-                    section_text = f"[{section} ({len(errors)})], {', '.join(errors)}"
-                    summary_lines.append(f"OBJECT : {obj_name.ljust(12)} | {section_text}")
+                    if errors:
+                        append_wrapped(summary_lines, obj_name, section, errors, width)
     
     return "\n".join(summary_lines)
 

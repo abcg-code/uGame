@@ -61,13 +61,13 @@ def check_texture_naming(img, strict):
     if map_type:
         suffixes = required_maps.get(map_type, set()) | optional_maps.get(map_type, set())
         if not any(name_clean.endswith(suffix) for suffix in suffixes):
-            report.append((f"Missing required suffix for {map_type}", img.name, "ERROR"))
+            report.append(("Missing required suffix", map_type, "ERROR"))
 
     if strict:
         for mt, suffixes in optional_maps.items():
             if mt.lower() in name_clean:
                 if not any(name_clean.endswith(suffix) for suffix in suffixes):
-                    report.append((f"Missing optional suffix for {mt}", name, "WARNING"))
+                    report.append(("Missing optional suffix", mt, "WARNING"))
 
     if any(fnmatch.fnmatch(name_lower, pattern) for pattern in banned_patterns):
         report.append(("Contains disallowed term", name, "ERROR"))
@@ -83,19 +83,19 @@ def check_texture_resolution(img, is_hero_asset):
     min_dim = min(w, h)
 
     if min_dim < 256:
-        report.append((f"Very low resolution ({w}x{h})", img.name, "ERROR"))
+        report.append((f"Very low resolution ({w}x{h})", f"{img.name}", "ERROR"))
     elif is_hero_asset and min_dim < 2048:
-        report.append((f"Resolution too low for Hero Asset ({w}x{h})", img.name, "ERROR"))
+        report.append((f"Resolution too low for Hero Asset ({w}x{h})", f"{img.name}", "ERROR"))
     elif not is_hero_asset and min_dim > 1024:
-        report.append((f"Resolution too high for background Asset ({w}x{h})", img.name, "ERROR"))
+        report.append((f"Resolution too high for background Asset ({w}x{h})", f"{img.name}", "ERROR"))
     elif min_dim < 512:
-        report.append((f"Low resolution ({w}x{h})", img.name, "WARNING"))
+        report.append((f"Low resolution ({w}x{h})", f"{img.name}", "WARNING"))
     else:
-        report.append((f"Resolution OK ({w}x{h})", img.name, "INFO"))
+        report.append((f"Resolution OK ({w}x{h})", f"{img.name}", "INFO"))
 
     pot = (w & (w -1) == 0) and (h & (h - 1) == 0)
     if not pot:
-        report.append((f"Not power-of-two ({w}x{h})", img.name, "ERROR"))
+        report.append((f"Not power-of-two ({w}x{h})", f"{img.name}", "ERROR"))
     
     return report
 

@@ -50,13 +50,13 @@ section_aliases = {
 valid_prefixes = ["T_", "TEX_"]
 
 required_maps = {
-    "Diffuse": {s.lower() for s in {"_c", "_col", "_color", "_basecolor", "_base_color", "_albedo", "_diffuse"}},
-    "Normal": {s.lower() for s in {"_n", "_nrm", "_normal", "_h", "_height"}},
-    "Roughness": {s.lower() for s in {"_r", "_roughness", "_rma"}}
+    "Diffuse": {s.lower() for s in {"_c", "_col", "_color", "_basecolor", "_base_color", "_albedo", "_diffuse", "_diff"}},
+    "Normal": {s.lower() for s in {"_n", "_nrm", "_normal", "_h", "_height", "_nml"}},
+    "Roughness": {s.lower() for s in {"_r", "_roughness", "_rma", "_rough", "_rgh"}}
 }
 
 optional_maps = {
-    "Metallic": {s.lower() for s in {"_m", "_metallic", "_rma"}},
+    "Metallic": {s.lower() for s in {"_m", "_metallic", "_rma", "_met"}},
     "Emissive": {s.lower() for s in {"_e", "_emmissive"}},
     "Specular": {s.lower() for s in {"_s", "_spec", "_specular"}},
     "Ambient Occlusion": {s.lower() for s in {"_ao", "_occlusion", "_rma"}},
