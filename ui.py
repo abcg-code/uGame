@@ -45,13 +45,13 @@ def override_topbar():
 
 class OBJECT_OT_GameReadyPopup(bpy.types.Operator):
     bl_idname = "object.game_ready_popup"
-    bl_label = "Game Ready Checker"
+    bl_label = "Game Ready Check"
     bl_description = "Check game-readiness with settings"
     bl_options = {'REGISTER', 'UNDO'}
 
     def draw(self, context):
         layout = self.layout
-        layout.label(text="Check all models for game-readiness")
+        layout.label(text="Check assets for game-readiness")
         settings = context.scene.ugame_settings
 
         box = layout.box()

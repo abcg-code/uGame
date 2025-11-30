@@ -23,7 +23,11 @@ along with this program; if not, see https://www.gnu.org/licenses.
 import os
 import re
 import fnmatch
+from .helpers import (
+    is_hero_asset
+)
 from .constants import (
+    normalize_token,
     valid_prefixes,
     required_maps,
     optional_maps,
@@ -31,12 +35,17 @@ from .constants import (
 )
 
 def infer_map_type(name_clean):
+    token = normalize_token(name_clean)
     for map_type, suffixes in required_maps.items():
-        if any(name_clean.endswith(suffix) for suffix in suffixes):
-            return map_type
+        for suffix in suffixes:
+            if token.endswith(suffix):
+                # print("Matched", map_type, "with suffix", suffix, "for token", token)
+                return map_type
     for map_type, suffixes in optional_maps.items():
-        if any(name_clean.endswith(suffix) for suffix in suffixes):
-            return map_type
+        for suffix in suffixes:
+            if token.endswith(suffix):
+                # print("Matched", map_type, "with suffix", suffix, "for token", token)
+                return map_type
     return None
 
 def get_clean_name(img):
@@ -46,27 +55,42 @@ def get_clean_name(img):
 def get_clean_map_type(img):
     return infer_map_type(get_clean_name(img))
 
+def detect_map_type_from_node(node):
+    if node.type == 'TEX_IMAGE':
+        for link in node.outputs['Color'].links:
+            target = link.to_node
+            if target.type == 'NORMAL_MAP':
+                return "Normal"
+            if target.type == 'SEPARATE_COLOR':
+                return "Roughness"
+            if target.type in {'BSDF_PRINCIPLED', 'BSDF_DIFFUSE'}:
+                for sock in target.inputs:
+                    if sock.name.lower() in {"base color", "color"}:
+                        return "Diffuse"
+    return None
+
 def check_texture_naming(img, strict):
     report = []
     name = img.name
     name_lower = name.lower()
     name_clean = get_clean_name(img)
+    token = normalize_token(name_clean)
     map_type = infer_map_type(name_clean)
 
     all_suffixes = set().union(*required_maps.values(), *optional_maps.values())
-    has_valid_suffix = any(name_clean.endswith(suffix) for suffix in all_suffixes)
+    has_valid_suffix = any(token.endswith(suffix) for suffix in all_suffixes)
     if not has_valid_suffix:
         report.append(("Texture name invalid", img.name, "ERROR"))
 
     if map_type:
         suffixes = required_maps.get(map_type, set()) | optional_maps.get(map_type, set())
-        if not any(name_clean.endswith(suffix) for suffix in suffixes):
+        if not any(token.endswith(suffix) for suffix in suffixes):
             report.append(("Missing required suffix", map_type, "ERROR"))
 
     if strict:
         for mt, suffixes in optional_maps.items():
-            if mt.lower() in name_clean:
-                if not any(name_clean.endswith(suffix) for suffix in suffixes):
+            if normalize_token(mt) in token:
+                if not any(token.endswith(suffix) for suffix in suffixes):
                     report.append(("Missing optional suffix", mt, "WARNING"))
 
     if any(fnmatch.fnmatch(name_lower, pattern) for pattern in banned_patterns):
@@ -74,19 +98,20 @@ def check_texture_naming(img, strict):
 
     if strict and not any(name.startswith(prefix) for prefix in valid_prefixes):
         report.append(("Missing valid prefix (T_ or TEX_)", name, "WARNING"))
-
+    # print("token:", token)
+    # print("suffixes for Roughness:", required_maps["Roughness"])
     return report
 
-def check_texture_resolution(img, is_hero_asset):
+def check_texture_resolution(img):
     report = []
     w, h = img.size
     min_dim = min(w, h)
 
     if min_dim < 256:
         report.append((f"Very low resolution ({w}x{h})", f"{img.name}", "ERROR"))
-    elif is_hero_asset and min_dim < 2048:
+    elif is_hero_asset() and min_dim < 2048:
         report.append((f"Resolution too low for Hero Asset ({w}x{h})", f"{img.name}", "ERROR"))
-    elif not is_hero_asset and min_dim > 1024:
+    elif not is_hero_asset() and min_dim > 1024:
         report.append((f"Resolution too high for background Asset ({w}x{h})", f"{img.name}", "ERROR"))
     elif min_dim < 512:
         report.append((f"Low resolution ({w}x{h})", f"{img.name}", "WARNING"))

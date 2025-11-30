@@ -130,13 +130,14 @@ class OBJECT_OT_CheckGameReady(bpy.types.Operator):
             collection_utilization=collection_utilization,
             asset_collection_mode=settings.asset_collection_mode,
             active_object_mode=scan_single,
-            scan_single=scan_single,
             scan_collection=scan_collection,
-            scan_file=scan_file
+            scan_file=scan_file,
+            sel=selected_collection
         )
 
         # Report Header
-        report_lines.append("Game-Ready Check Report\n=======================\n\n")
+        title = "Game-Ready Check Report"
+        report_lines.append(f"\n{title}\n{'=' * len(title)}\n\n")
         report_lines.append(f"Asset Type: {'Hero' if is_hero_asset else 'Background'}\n")
         if scan_single:
             scope_label = "Active Object Scan"
@@ -150,30 +151,36 @@ class OBJECT_OT_CheckGameReady(bpy.types.Operator):
         report_lines.append(f"Scope: {scope_label}\n")
 
         # Final Summary
-        report_lines.append("\n[FINAL SUMMARY]\n===============\n\n")
-        has_errors = report_has_errors(report_data)
+        title = "[FINAL SUMMARY]"
+        report_lines.append(f"\n\n{'=' * len(title)}\n{title}\n{'=' * len(title)}\n\n")
+        has_errors = report_has_errors(report_data, asset_collection_mode=settings.asset_collection_mode, active_object_mode=scan_single)
         if has_errors:
             report_lines.append("Overall Game-Ready Status: FAIL\n\n")
-            report_lines.append(final_summary_text + "\n")
         else:
-            report_lines.append("Overall Game-Ready Status: PASS\n\n")
+            report_lines.append("Overall Game-Ready Status: PASS")
+
+        report_lines.append(final_summary_text + "\n")
             
 
         # Excluded Objects
+        title = "[Excluded Objects]"
         if excluded_objects:
-            report_lines.append("\n[Excluded Objects]\n====================\n\n")
+            report_lines.append(f"\n\n{'=' * len(title)}\n{title}\n{'=' * len(title)}\n\n")
             for name in excluded_objects:
                 report_lines.append(f"- {name} (high-poly)\n")
 
         # Collection Structure
+        title = "[Collection Structure]"
         if scan_collection and selected_collection:
-            report_lines.append("\n\n[Collection Structure]\n======================\n\n")
+            report_lines.append(f"\n\n{'=' * len(title)}\n{title}\n{'=' * len(title)}\n\n")
             report_lines.extend(format_collection_block(selected_collection))
             for child in selected_collection.children:
                 report_lines.append("\n")
                 report_lines.extend(format_collection_block(child))
 
         # Per-object detail
+        title = "[Per-Object Detail]"
+        report_lines.append(f"\n\n{'=' * len(title)}\n{title}\n{'=' * len(title)}\n")
         settings = context.scene.ugame_settings
         for obj in mesh_objects:
             flat_report = dispatch_checks(obj, settings)

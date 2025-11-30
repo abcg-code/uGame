@@ -21,6 +21,7 @@ along with this program; if not, see https://www.gnu.org/licenses.
 '''
 
 import bpy
+import os
 import bmesh
 import fnmatch
 import mathutils
@@ -33,7 +34,23 @@ from .helpers import (
     get_all_objects_recursive,
     count_uv_islands,
     get_total_uv_and_face_area,
-    is_uv_layout_stacked
+    is_uv_layout_stacked,
+    is_mesh,
+    has_armature,
+    collection_has_armature,
+    get_transform_status,
+    has_seams,
+    has_uvs,
+    has_textures,
+    ensure_object_mode,
+    is_hero_asset,
+    aaa_mode,
+    # is_multi_object_asset,
+    # build_bvh,
+    # mesh_centroid,
+    # face_neighbors_indexed,
+    find_flipped_faces,
+    # find_flipped_faces_by_angle
 )
 from .constants import (
     required_maps,
@@ -48,19 +65,17 @@ from .texture_checks import (
     check_texture_naming,
     check_texture_resolution,
     is_node_connected,
-    get_clean_map_type
+    get_clean_map_type,
+    detect_map_type_from_node
 )
 
 def check_collection_structure(collection):
     report = []
 
-    if bpy.context.mode != 'OBJECT':
-        bpy.ops.object.mode_set(mode='OBJECT')
+    ensure_object_mode()
 
-    
-    obj_types = {obj.type for obj in collection.objects}
-    if "ARMATURE" not in obj_types:
-        report.append((collection.name, "No armature present", "WARNING"))
+    if not collection_has_armature(collection):
+        report.append((collection.name, "No armature present", "INFO"))
 
     if collection.children:
         child_names = ", ".join(child.name for child in collection.children)
@@ -71,8 +86,7 @@ def check_collection_structure(collection):
 def check_collection_transforms(collection):
     report = []
 
-    if bpy.context.mode != 'OBJECT':
-        bpy.ops.object.mode_set(mode='OBJECT')
+    ensure_object_mode()
 
     objects = [obj for obj in get_all_objects_recursive(collection) if obj.type in {'MESH', 'ARMATURE'}]
     if not objects:
@@ -85,11 +99,12 @@ def check_collection_transforms(collection):
 
     for obj in objects:
         top = get_top_parent(obj)
-        if not all(val == 1.0 for val in top.scale):
+        scale_applied, rotation_applied, location_applied = get_transform_status(top)
+        if not scale_applied:
             unapplied_types.add("Scale")
-        if not all(val == 0.0 for val in top.rotation_euler):
+        if not rotation_applied:
             unapplied_types.add("Rotation")
-        if not is_location_applied(top):
+        if not location_applied:
             unapplied_types.add("Location")
         
     if unapplied_types:
@@ -98,22 +113,6 @@ def check_collection_transforms(collection):
         report.append(("Transforms Applied", "OK", "INFO"))
 
     return report
-
-def check_flipped_normals(obj):
-    if obj.type != 'MESH':
-        return 0
-
-
-    mesh = obj.data
-    flipped_count = 0
-
-    for poly in mesh.polygons:
-        center = poly.center
-        normal = poly.normal
-        if normal.dot(center.normalized()) < 0:
-            flipped_count += 1
-
-    return flipped_count
 
 def check_counts(obj):
     mesh = obj.data
@@ -169,10 +168,14 @@ def check_transforms(obj, settings):
 
     return [("Unapplied Transforms", ", ".join(reasons), level)]
 
+def check_flipped_normals(obj):
+    flipped_faces = find_flipped_faces(obj)
+    return len(flipped_faces)
+
 def check_normals(obj):
     flipped = check_flipped_normals(obj)
     if flipped > 0:
-        return [("Normals", f"{flipped} faces appear flipped", "WARNING")]
+        return [("Normals", f"{flipped} faces appear flipped", "ERROR")]
     return [("Normals", "No flipped normals detected", "INFO")]
 
 def check_double_vertices(obj, threshold=0.0001):
@@ -194,16 +197,16 @@ def check_double_vertices(obj, threshold=0.0001):
 
     bm.free()
     if double_count > 0:
-        return [("Double Vertices: ", f"{double_count} within {threshold}m", "ERROR")]
+        double_count //= 2
+        return [("Double Vertices", f"{double_count} within {threshold}m", "ERROR")]
     return [("Double Vertices: ", "None found", "INFO")]
 
 def check_geometry(obj, settings):
     report = []
 
-    if bpy.context.mode != 'OBJECT':
-        bpy.ops.object.mode_set(mode='OBJECT')
+    ensure_object_mode()
 
-    if obj.type != 'MESH':
+    if not is_mesh(obj):
         return report
 
     report.extend(check_counts(obj))
@@ -230,36 +233,33 @@ def check_object_modifiers(obj):
 
     return report
 
-def check_uvs(obj):
+def check_uvs(obj, multi_object_asset=False):
     report = []
 
-    if obj.type != 'MESH':
+    if not is_mesh(obj):
         return [("UVs", "Not a mesh object", "INFO")]
 
-    if bpy.context.mode != 'OBJECT':
-        bpy.ops.object.mode_set(mode='OBJECT')
-
-    settings = bpy.context.scene.ugame_settings
+    found, packed_count, _ = has_textures(obj)
+    if packed_count == 0:
+        return [("UVs", "Skipped UV checks (no packed textures detected)", "INFO")]
+    
+    ensure_object_mode()
     mesh = obj.data
-    aaa_mode = settings.aaa_game_check
-    target = 90.0 if aaa_mode else 80.0
-    pass_threshold = 85.0 if aaa_mode else 70.0
-
-    uv_unwrapped = bool(mesh.uv_layers)
-    seams_exist = any(edge.use_seam for edge in mesh.edges)
+    target = 90.0 if aaa_mode() else 80.0
+    pass_threshold = 85.0 if aaa_mode() else 70.0
 
     # Unwrap/seams
-    if not uv_unwrapped:
+    if not has_uvs(obj):
         report.append(("UVs", "Mesh not unwrapped", "ERROR"))
     else:
         report.append(("UV Unwrapped", "True", "INFO"))
 
-    if not seams_exist:
-        report.append(("Marked Seams", "None", "ERROR"))
+    if not has_seams(obj):
+        report.append(("UVs", "Marked Seams: None", "ERROR"))
     else:
-        report.append(("Marked Seams", "Found", "INFO"))
+        report.append(("UVs", "Marked Seams: Found", "INFO"))
 
-    if not mesh.uv_layers.active:
+    if not has_uvs:
         report.append(("UV Layer", "No active UV layer found", "ERROR"))
         return report
 
@@ -269,7 +269,7 @@ def check_uvs(obj):
     if uv_islands == 1 and is_simple_mesh:
         report.append(("UV Island Count", f"{uv_islands} island (simple mesh)", "INFO"))
     else:
-        threshold = 200 if settings.is_hero_asset else 100
+        threshold = 200 if is_hero_asset() else 100
         if uv_islands > threshold:
             report.append(("UV Island Count", f"{uv_islands} islands", "ERROR"))
         elif uv_islands > threshold * 0.75:
@@ -279,16 +279,20 @@ def check_uvs(obj):
 
     # Utilization
     utilization, overflow, uvs = get_uv_utilization(obj)
+
     if utilization == 0.0 and len(uvs) > 0:
-        report.append(("UV Space Utilization", "UVs exist, but layout collapsed/invalid", "WARNING"))
+        level = "WARNING" if multi_object_asset else "ERROR"
+        report.append(("UV Space Utilization", "UVs exist, but layout collapsed/invalid", level))
     elif overflow:
-        report.append(("UV Space Utilization", f"{utilization}% (UVs exceed 0-1 space)", "ERROR"))
+        level = "WARNING" if multi_object_asset else "ERROR"
+        report.append(("UV Space Utilization", f"{utilization}% (UVs exceed 0-1 space)", level))
     elif utilization >= pass_threshold:
         report.append(("Uv Space Utilization", f"{utilization}%", "INFO"))
     elif utilization >= target -5:
         report.append(("UV Space Utilization", f"{utilization}% (suboptimal)", "WARNING"))
     else:
-        report.append(("UV Space Utilization", f"{utilization}% (too low)", "ERROR"))
+        level = "WARNING" if multi_object_asset else "ERROR"
+        report.append(("UV Space Utilization", f"{utilization}% (too low)", level))
 
     # Color atlas detection
     texture_map_names = [slot.name for slot in obj.material_slots if slot.material]
@@ -303,42 +307,42 @@ def check_uvs(obj):
     if not has_normal: atlas_score += 1
     if not has_roughness: atlas_score += 1
     if uv_islands < 15: atlas_score += 1
-    if not seams_exist: atlas_score += 1
+    if not has_seams(obj): atlas_score += 1
 
     is_color_atlas = atlas_score >= 5
     if is_color_atlas:
         report.append(("UV Strategy", f"Color atlas confidence: {atlas_score}/6", "INFO"))
 
     # Texel density
-    if uv_unwrapped and not is_color_atlas:
+    if has_uvs and not is_color_atlas:
         total_uv_area, total_face_area = get_total_uv_and_face_area(obj)
         ratio = round(total_uv_area / total_face_area, 2) if total_face_area > 0 else 0
         avg_density, deviation = get_island_texel_densities(obj)
 
-        passed = ratio >= TEXEL_DENSITY_MIN_AAA if aaa_mode else TEXEL_DENSITY_RANGE[0] <= ratio <= TEXEL_DENSITY_RANGE[1]
+        passed = ratio >= TEXEL_DENSITY_MIN_AAA if aaa_mode() else TEXEL_DENSITY_RANGE[0] <= ratio <= TEXEL_DENSITY_RANGE[1]
         report.append(("Texel Density Ratio", f"{ratio:.2f} px/cm", "INFO" if passed else "WARNING"))
         report.append(("Texel Density Avg", f"{avg_density:.2f}", "INFO"))
         report.append(("Texel Density Deviation", f"{deviation:.2f}", "WARNING" if deviation > TEXEL_DENSITY_DEVIATION_THRESHOLD * avg_density else "INFO"))
 
         if is_uv_layout_stacked(uvs):
-            level = "ERROR" if settings.is_hero_asset else "WARNING"
+            level = "WARNING" if is_hero_asset() else "INFO"
             report.append(("UV Layout", "Majority of UVs are stacked or overlapping", level))
 
         # Smart UV detection
-        smart_uv = uv_islands > 50 and not seams_exist
+        smart_uv = uv_islands > 50 and not has_seams(obj)
         poor_density = ratio < 0.5 or deviation > TEXEL_DENSITY_DEVIATION_THRESHOLD * avg_density
-        level = "ERROR" if settings.is_hero_asset else "WARNING"
+        level = "ERROR" if is_hero_asset() else "WARNING"
 
         if smart_uv and poor_density:
             report.append(("Unwrapping Quality", "Likely Smart UV Project with poor texel density", level))
         elif smart_uv:
             report.append(("Unwrapping Quality", "Likely Smart UV Project", level))
-        elif uv_islands < 2:
+        elif uv_islands < 2 and not has_seams:
             report.append(("Unwrapping Quality", "Likely default UVs", "ERROR"))
         else:
             report.append(("Unwrapping Quality", "Seams detected, unwrap appears manual", "INFO"))
 
-    if aaa_mode:
+    if aaa_mode():
         report.append(("AAA Target", "UV Utilization should be ~90%", "INFO"))
 
     return report
@@ -347,9 +351,20 @@ def check_textures(obj, is_color_atlas=False):
     report = []
     used_images = set()
     found_maps = set()
-    settings = bpy.context.scene.ugame_settings
-    strict = settings.aaa_game_check
-    is_hero_asset = settings.is_hero_asset
+    strict = aaa_mode()
+
+    if not is_mesh(obj):
+        return [("Textures", "Not a mesh object", "INFO")]
+    
+    found, packed_count, unpacked_reports = has_textures(obj)
+
+    if not found:
+        return [("Textures", "No textures found", "ERROR")]
+
+    report.extend(unpacked_reports)
+
+    if packed_count == 0 and not unpacked_reports:
+        return report
 
     for mat_slot in obj.material_slots:
         mat = mat_slot.material
@@ -363,18 +378,26 @@ def check_textures(obj, is_color_atlas=False):
             img = node.image
             used_images.add(img)
 
-            for check_fn in [check_texture_naming, check_texture_resolution]:
-                arg = strict if check_fn != check_texture_resolution else is_hero_asset
-                for reason, map_name, level in check_fn(img, arg):
-                    report.append((reason, map_name, level))
-            
-            if img.source == 'TILED':
-                tile_count = len(img.tiles)
-                report.append((f"[{mat.name}] UDIM detected", f"{tile_count} tiles", "INFO"))
+            if img.packed_file is not None:
+                report.extend(check_texture_naming(img, strict))
+                report.extend(check_texture_resolution(img))
+                if img.source == 'TILED':
+                    tile_count = len(img.tiles)
+                    report.append((f"[{mat.name}] UDIM detected", f"{tile_count} tiles", "INFO"))
+            else:
+                abs_path = bpy.path.abspath(img.filepath)
+                if not abs_path or not os.path.exists(abs_path):
+                    report.append(("Missing External Texture", img.name, "ERROR"))
+                else:
+                    report.append(("Unpacked Texture (External)", img.name, "ERROR"))
 
-            map_type = get_clean_map_type(img)
+                report.extend(check_texture_naming(img, strict))
+                report.extend(check_texture_resolution(img))
+
+            map_type = get_clean_map_type(img) or detect_map_type_from_node(node)
             if map_type:
                 found_maps.add(map_type)
+                # print("Added map_type:", map_type, "from image:", img.name)
 
             if not is_node_connected(node):
                 report.append((f"[{mat.name}] Image node not connected", img.name, "WARNING"))
@@ -383,11 +406,11 @@ def check_textures(obj, is_color_atlas=False):
         for map_type in required_maps:
             if map_type not in found_maps:
                 if map_type == "Roughness":
-                    level = "ERROR" if is_hero_asset else "WARNING"
+                    level = "ERROR" if is_hero_asset() else "WARNING"
                     report.append((f"Missing Texture Map", map_type, level))
                 else:
                     report.append((f"Missing Texture Map", map_type, "ERROR"))
-
+        
         missing_optional = [m for m in optional_maps if m not in found_maps]
         if missing_optional:
             report.append((f"Optional Maps", "Missing: " + ", ".join(missing_optional), "WARNING"))
@@ -401,16 +424,15 @@ def check_textures(obj, is_color_atlas=False):
 def check_rigging(obj):
     report = []
 
-    if bpy.context.mode != 'OBJECT':
-        bpy.ops.object.mode_set(mode='OBJECT')
+    ensure_object_mode()
 
-    if obj.type != 'MESH':
+    if not is_mesh(obj):
         return [("Rigging", "Not a mesh object", "INFO")]
 
-    armature_mod = next((m for m in obj.modifiers if m.type == 'ARMATURE'), None)
-    if not armature_mod or not armature_mod.object:
+    if not has_armature(obj):
         return [("Rigging", "No armature linked", "INFO")]
 
+    armature_mod = next((m for m in obj.modifiers if m.type == 'ARMATURE' and m.object), None)
     armature = armature_mod.object
     bones = armature.data.bones
     pose_bones = armature.pose.bones if armature.pose else []
