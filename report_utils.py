@@ -161,22 +161,6 @@ def build_final_summary(report_data,
     pass_threshold = 85.0 if aaa_mode() else 70.0
     multi = is_multi_object_asset(report_data, asset_collection_mode, active_object_mode)
 
-    # def append_wrapped(summary_lines, obj_name, section, errors, width):
-    #     prefix = f"OBJECT : {obj_name.ljust(12)} | [{section} ({len(errors)})], "
-    #     indent = " " * len(prefix)
-    #     current_line = prefix
-    #     current_length = len(current_line)
-    #     for i, err in enumerate(errors):
-    #         err_text = err + (", " if i < len(errors) - 1 else "")
-    #         if current_length + len(err_text) > width:
-    #             summary_lines.append(current_line.rstrip(", "))
-    #             current_line = indent + err_text
-    #             current_length = len(current_line)
-    #         else:
-    #             current_line += err_text
-    #             current_length += len(err_text)
-    #     summary_lines.append(current_line.rstrip(" |"))
-
     def format_section(section, errors, width, indent):
         lines = []
         prefix = f"[{section} ({len(errors)})], "
@@ -239,22 +223,6 @@ def build_final_summary(report_data,
         
         summary_lines.append("")
 
-    #     for obj_name, issues in report_data.items():
-    #         for section, items in issues.items():
-    #             if section == "UVs":
-    #                 filtered_errors = []
-    #                 for label, value, level in items:
-    #                     if multi and "UV Sapce Utilization" in label:
-    #                         continue
-    #                     if level == "ERROR":
-    #                         filtered_errors.append(f"{label}: {value}")
-    #                 if filtered_errors:
-    #                     append_wrapped(summary_lines, obj_name, section, filtered_errors, width)
-    #                 continue
-    #             errors = extract_errors(items, group_by_label=True if section == "Modifiers" else False)
-    #             if not errors:
-    #                 continue
-
     for obj_name, issues in report_data.items():
         summary_lines.append(f"OBJECT : {obj_name}")
         indent = " " * 8
@@ -295,49 +263,6 @@ def build_final_summary(report_data,
                     summary_lines.extend(format_section(section, errors, width, indent))
         
         summary_lines.append("")
-
-    # for obj_name, issues in report_data.items():
-    #     for section, items in issues.items():
-    #         errors = extract_errors(items, group_by_label=True if section == "Modifiers" else False)
-    #         if not errors and section not in ("Modifiers", "Textures"):
-    #             continue
-
-    #         if section == "Modifiers":
-    #             if not errors:
-    #                 continue
-    #             disallowed = []
-    #             for label in errors:
-    #                 clean = label.replace("Modifier:", "").replace("Modifiers:", "")
-    #                 clean = clean.replace("(Disallowed type:", "").replace(")", "")
-    #                 clean = clean.strip()
-    #                 parts = [p.strip() for p in clean.split(":") if p.strip()]
-    #                 if len(parts) > 1:
-    #                     clean = parts[0]
-    #                 elif parts:
-    #                     clean = parts[0]
-    #                 disallowed.append(clean)
-    #             section_text = f"[{section} ({len(errors)})], Disallowed type: {', '.join(disallowed)}"
-    #             summary_lines.append(f"OBJECT : {obj_name.ljust(12)} | {section_text}")
-
-    #         elif section == "Textures":
-    #             if not errors:
-    #                 continue
-    #             summaries, total_maps = summarize_texture_errors(items)
-    #             if summaries:
-    #                 prefix = f"OBJECT : {obj_name.ljust(12)} | [Textures ({total_maps})], "
-    #                 indent = " " * len(prefix)
-    #                 for i, summary in enumerate(summaries):
-    #                     wrapped_lines = wrap_texture_summary(summary, indent, width)
-    #                     if i == 0:
-    #                         summary_lines.append(prefix + wrapped_lines[0])
-    #                         for line in wrapped_lines[1:]:
-    #                             summary_lines.append(line)
-    #                     else:
-    #                         for line in wrapped_lines:
-    #                             summary_lines.append(indent + line)
-    #         else:
-    #             if errors:
-    #                 append_wrapped(summary_lines, obj_name, section, errors, width)
     
     return "\n".join(summary_lines)
 
