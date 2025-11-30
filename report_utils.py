@@ -224,6 +224,12 @@ def build_final_summary(report_data,
         summary_lines.append("")
 
     for obj_name, issues in report_data.items():
+        obj_errors = []
+        for section, items in issues.items():
+            obj_errors.extend(extract_errors(items))
+        if not obj_errors:
+            continue
+        
         summary_lines.append(f"OBJECT : {obj_name}")
         indent = " " * 8
 
