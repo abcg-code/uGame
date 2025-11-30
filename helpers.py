@@ -22,7 +22,9 @@ along with this program; if not, see https://www.gnu.org/licenses.
 
 import bpy
 import bmesh
-from mathutils import Vector, geometry
+from .constants import section_aliases
+from mathutils import Vector # Matrix
+# from mathutils.bvhtree import BVHTree
 
 def is_location_applied(obj):
     has_parent = obj.parent is not None
@@ -64,7 +66,7 @@ def calculate_uv_area(face, uv_layer):
         a = uv_coords[0]
         b = uv_coords[i]
         c = uv_coords[i + 1]
-        area += geometry.area_tri(a, b, c)
+        area += abs((b - a).cross(c - a)) / 2.0
 
     return area
 
@@ -217,7 +219,154 @@ def is_uv_layout_stacked(uvs, threshold=0.1):
         return False
     unique_uvs = set((round(u, 5), round(v, 5)) for u, v in uvs)
     return len(unique_uvs) / len(uvs) < threshold
-    
+
+# def build_bvh(obj):
+#     mesh = obj.data
+#     bm = bmesh.new()
+#     bm.from_mesh(mesh)
+#     bm.verts.ensure_lookup_table()
+#     bm.faces.ensure_lookup_table()
+
+#     # Build BVH in object space
+#     tris = []
+#     coords = []
+#     for f in bm.faces:
+#         # Triangulate on the fly for BVH stability
+#         if len(f.verts) ==3:
+#             tris.append([v.index for v in f.verts])
+#         else:
+#             # naive fan triangulation
+#             v0 = f.verts[0].index
+#             for i in range(1, len(f.verts) - 1):
+#                 tris.append([v0, f.verts[i].index, f.verts[i+1].index])
+
+#     coords = [v.co.copy() for v in bm.verts]
+#     bvh = BVHTree.FromPolygons(coords, tris)
+#     bm.free()
+#     return bvh
+
+# def mesh_centroid(obj):
+#     """
+#     Returns the centroid of the mesh in object space using bmesh.
+#     Compatible with edit-mode and non-edit-mode workflows.
+#     """
+#     if not is_mesh(obj):
+#         return Vector((0, 0, 0))
+
+#     bm = bmesh.new()
+#     bm.from_mesh(obj.data)
+#     bm.verts.ensure_lookup_table()
+
+#     if len(bm.verts) == 0:
+#         bm.free()
+#         return Vector((0, 0, 0))
+
+#     total = Vector((0, 0, 0))
+#     for v in bm.verts:
+#         total += v.co
+
+#     bm.free()
+#     return total / len(bm.verts)
+
+# def face_neighbors_indexed(mesh):
+#     # Build adjacency: face -> set of neighbor face indices sharing an edge
+#     neighbors = [set() for _ in mesh.polygons]
+#     edge_to_faces = {}
+#     for fi, f in enumerate(mesh.polygons):
+#         for ei in f.edge_keys:
+#             edge_to_faces.setdefault(ei, []).append(fi)
+#     for faces in edge_to_faces.values():
+#         if len(faces) == 2:
+#             a, b = faces
+#             neighbors[a].add(b)
+#             neighbors[b].add(a)
+#     return neighbors
+
+# def find_flipped_faces(obj,
+#                        neighbor_align_threshold=0.5,
+#                        flipped_opposition_threshold=-0.7,
+#                        min_neighbors=2,
+#                        majority_ratio=0.9):
+#     if not is_mesh(obj):
+#         return []
+
+#     bm = bmesh.new()
+#     bm.from_mesh(obj.data)
+#     bm.faces.ensure_lookup_table()
+#     bm.verts.ensure_lookup_table()
+#     bm.normal_update()
+
+#     flipped = []
+
+#     for f in bm.faces:
+#         neighbors = set()
+#         for e in f.edges:
+#             for lf in e.link_faces:
+#                 if lf != f:
+#                     neighbors.add(lf)
+
+#         neighbors = list(neighbors)
+#         if len(neighbors) < min_neighbors:
+#             continue
+
+#         aligned_count = 0
+#         total_pairs = 0
+#         for i in range(len(neighbors)):
+#             ni = neighbors[i].normal
+#             for j in range(i + 1, len(neighbors)):
+#                 nj = neighbors[j].normal
+#                 total_pairs += 1
+#                 if ni.dot(nj) > neighbor_align_threshold:
+#                     aligned_count += 1
+
+#         if total_pairs == 0:
+#             continue
+
+#         align_ratio = aligned_count / total_pairs
+#         if align_ratio < majority_ratio:
+#             continue
+
+#         avg = sum((nf.normal for nf in neighbors), Vector((0.0, 0.0, 0.0)))
+#         if avg.length_squared == 0.0:
+#             continue
+#         avg.normalize()
+#         dot_to_avg = f.normal.dot(avg)
+
+#         if dot_to_avg < flipped_opposition_threshold:
+#             flipped.append(f.index)
+
+#     bm.free()
+#     return flipped
+
+# def find_flipped_faces_by_angle(obj, seed_index=0, dot_threshold=0.0):
+#     if not is_mesh(obj):
+#         return []
+
+#     bm = bmesh.new()
+#     bm.from_mesh(obj.data)
+#     bm.faces.ensure_lookup_table()
+#     bm.normal_update()
+
+#     flipped = []
+#     visited = set()
+#     stack = [bm.faces[seed_index]]
+
+#     while stack:
+#         f = stack.pop()
+#         visited.add(f.index)
+#         for e in f.edges:
+#             for nf in e.link_faces:
+#                 if nf.index in visited:
+#                     continue
+#                 dot = f.normal.dot(nf.normal)
+
+#                 if dot < dot_threshold:
+#                     flipped.append(nf.index)
+
+#                 stack.append(nf)
+#     bm.free()
+#     return flipped
+
 def dispatch_checks(obj, settings):
     from .checks import (
         check_geometry,
@@ -235,10 +384,10 @@ def dispatch_checks(obj, settings):
     if obj.type == 'MESH':
         report.extend(check_geometry(obj, settings))
         report.extend(check_object_modifiers(obj))
-        report.extend(check_uvs(obj))
+        report.extend(check_uvs(obj, multi_object_asset=(not settings.scan_single_object)))
         report.extend(check_textures(obj))
 
-        if any(mod.type == 'ARMATURE' for mod in obj.modifiers):
+        if has_armature(obj):
             report.extend(check_rigging(obj))
 
         return report
@@ -246,6 +395,10 @@ def dispatch_checks(obj, settings):
     return [("Other", f"Skipped unsupported type: {obj.type}", "INFO")]
 
 def infer_section_from_label(label: str) -> str:
+    for key, section in section_aliases.items():
+        if label.startswith(key) or key in label:
+            return section
+
     if (
         label.startswith("Texture")
         or label.startswith("Missing Texture Map")
@@ -278,3 +431,349 @@ def infer_section_from_label(label: str) -> str:
   
     return "Other"
 
+def has_textures(obj) -> tuple[bool, int, list[tuple[str, str, str]]]:
+    found = False
+    packed_count = 0
+    unpacked_reports = []
+
+    for mat_slot in obj.material_slots:
+        mat = mat_slot.material
+        if not mat or not mat.use_nodes:
+            continue
+        for node in mat.node_tree.nodes:
+            if node.type == 'TEX_IMAGE' and node.image:
+                found = True
+                img = node.image
+                if img.packed_file is not None:
+                    packed_count += 1 
+                else:
+                    unpacked_reports.append(("Textures", f"External texture image ({img.name})", "ERROR"))
+    return found, packed_count, unpacked_reports
+
+def ensure_object_mode():
+    if bpy.context.mode != 'OBJECT':
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+def is_mesh(obj):
+    return obj.type == 'MESH'
+
+def has_armature(obj) -> bool:
+    return any(mod.type == 'ARMATURE' and mod.object for mod in obj.modifiers)
+
+def collection_has_armature(collection):
+    return any(obj.type == 'ARMATURE' for obj in collection.objects)
+
+def has_uvs(obj) -> bool:
+    return obj.type == 'MESH' and bool(obj.data.uv_layers)
+
+def has_seams(obj) -> bool:
+    return obj.type == 'MESH' and any(edge.use_seam for edge in obj.data.edges)
+
+def aaa_mode() -> bool:
+    return bpy.context.scene.ugame_settings.aaa_game_check
+
+def is_hero_asset() -> bool:
+    return bpy.context.scene.ugame_settings.is_hero_asset
+
+def is_multi_object_asset(report_data, asset_collection_mode, active_object_mode):
+    return len(report_data) > 1 and not asset_collection_mode and not active_object_mode
+
+# # *******************
+# # * Flipped Normals *
+# # *******************
+
+# # -----------------------------
+# # Utilities: islands and volume
+# # -----------------------------
+
+def _is_mesh(obj):
+    return getattr(obj, "type", None) == "MESH"
+
+def _island_faces(bm):
+    islands = []
+    visited = set()
+    bm.faces.ensure_lookup_table()
+    for f in bm.faces:
+        if f.index in visited:
+            continue
+        stack = [f]
+        island =[]
+        while stack:
+            face = stack.pop()
+            if face.index in visited:
+                continue
+            visited.add(face.index)
+            island.append(face)
+            for e in face.edges:
+                for lf in e.link_faces:
+                    if lf.index not in visited:
+                        stack.append(lf)
+        islands.append(island)
+    return islands
+
+# def _is_watertight(island):
+#     for f in island:
+#         for e in f.edges:
+#             if len(e.link_faces) != 2:
+#                 return False
+#     return True
+
+# def _tri_signed_volume(a, b, c):
+#     return (a.dot(b.cross(c))) / 6.0
+
+# def _island_signed_volume(island):
+#     temp = bmesh.new()
+#     vert_map = {}
+#     for f in island:
+#         for v in f.verts:
+#             if v.index not in vert_map:
+#                 vert_map[v.index] = temp.verts.new(v.co.copy())
+#     temp.verts.ensure_lookup_table()
+#     for f in island:
+#         nv = [vert_map[v.index] for v in f.verts]
+#         temp.faces.new(nv)
+#     temp.faces.ensure_lookup_table()
+#     bmesh.ops.triangulate(temp, faces=temp.faces[:])
+#     total = 0.0
+#     for tf in temp.faces:
+#         vs = [l.vert.co for l in tf.loops]
+#         total += (vs[0].dot(vs[1].cross(vs[2]))) / 6.0
+#     temp.free()
+#     return total
+
+# # -------------------------
+# # Seed selection per island
+# # -------------------------
+
+def _select_seed_face(island):
+    verts = {v for f in island for v in f.verts}
+    if not verts:
+        return None
+    centroid = sum((v.co for v in verts), Vector((0.0, 0.0, 0.0))) / len(verts)
+    best, best_dot = None, -1.0
+    for f in island:
+        c = f.calc_center_median()
+        outward = (c - centroid)
+        if outward.length_squared == 0.0:
+            continue
+        outward.normalize()
+        d = f.normal.dot(outward)
+        if d > best_dot:
+            best, best_dot = f, d
+    return best
+
+# # -----------------------
+# # Orientation propagation
+# # -----------------------
+
+# def _expected_neighbor_dirs(edge_vec, seed_normal):
+#     """
+#     Predict the neighbors faces primary normal direction from the seed normal and shared edge vector.
+#     For orthogonal geometry (e.g., cube), n_expected ~ edge_vec x seed_normal.
+#     """
+#     exp = edge_vec.cross(seed_normal)
+#     if exp.length_squared == 0.0:
+#         return None
+#     exp.normalize()
+#     return exp, -exp
+
+# def _propogate_island(island, dot_consistency_threshold=0.0):
+#     """
+#     Propagate orientation across an island using edge-driven expected direction.
+#     Returns:
+#         flipped_local: set of face indices flagged as locally flipped
+#         visited: set of visited face indices
+#     """
+#     verts = {v for f in island for v in f.verts}
+#     centroid = sum((v.co for v in verts), Vector((0.0, 0.0, 0.0))) / max(1, len(verts))
+#     seed = _select_seed_face(island, centroid, dot_threshold=0.1)
+#     if seed is None:
+#         return set(), set()
+
+#     flipped_local = set()
+#     visited = set()
+#     stack = [seed]
+
+#     while stack:
+#         f = stack.pop()
+#         if f.index in visited:
+#             continue
+#         visited.add(f.index)
+
+#         for e in f.edges:
+#             v0, v1 = e.verts[0].co, e.verts[1].co
+#             edge_vec = (v1 - v0)
+#             if edge_vec.length_squared == 0.0:
+#                 continue
+#             edge_vec.normalize()
+
+#             exp_pos, exp_neg = _expected_neighbor_dirs(edge_vec, f.normal)
+#             if exp_pos is None:
+#                 continue
+
+#             for nf in e.link_faces:
+#                 if nf == f or nf.index in visited:
+#                     continue
+
+#                 dot_pos = nf.normal.dot(exp_pos)
+#                 dot_neg = nf.normal.dot(exp_neg)
+#                 dot_best = max(dot_pos, dot_neg)
+
+#                 if dot_best < dot_consistency_threshold:
+#                     flipped_local.add(nf.index)
+
+#                 stack.append(nf)
+    
+#     return flipped_local, visited
+
+# def _edge_dir_in_faces(face, edge):
+#     v0, v1 = edge.verts
+#     loops = face.loops
+#     n = len(loops)
+#     for i in range(n):
+#         li = loops[i]
+#         lj = loops[(i + 1) % n]
+#         if li.vert == v0 and lj.vert == v1:
+#             return +1
+#         if li.vert == v1 and lj.vert == v0:
+#             return -1
+#     return 0
+
+# def _cluster_flipped_faces(island):
+#     """
+#     Partition faces into orientation clusters classify flipped cluster
+#     by comparing normals to outward centroid direction.
+#     """
+#     adjacency = {f.index: set() for f in island}
+#     for e in {edge for f in island for edge in f.edges}:
+#         if len(e.link_faces) != 2:
+#             continue
+#         f1, f2 = e.link_faces
+#         d1 = _edge_dir_in_faces(f1, e)
+#         d2 = _edge_dir_in_faces(f2, e)
+#         if d1 == d2 and d1 != 0:
+#             adjacency[f1.index].add(f2.index)
+#             adjacency[f2.index].add(f1.index)
+
+#     visited = set()
+#     clusters = []
+#     for f in island:
+#         if f.index in visited:
+#             continue
+#         stack = [f.index]
+#         cluster = set()
+#         while stack:
+#             idx = stack.pop()
+#             if idx in visited:
+#                 continue
+#             visited.add(idx)
+#             cluster.add(idx)
+#             stack.extend(adjacency[idx])
+#         clusters.append(cluster)
+
+#     if len(clusters) <= 1:
+#         return []
+
+#     verts = {v for f in island for v in f.verts}
+#     centroid = sum((v.co for v in verts), Vector((0,0,0))) / len(verts)
+
+#     flipped = []
+#     for cluster in clusters:
+#         dots = []
+#         for idx in cluster:
+#             f = next(ff for ff in island if ff.index == idx)
+#             outward = (f.calc_center_median() - centroid).normalized()
+#             dots.append(f.normal.dot(outward))
+#         avg_dot = sum(dots) / len(dots)
+#         if avg_dot < 0:
+#             flipped.extend(cluster)
+
+#     return flipped
+
+def _propagate_consistency(island, inside=False):
+    flipped_local = set()
+    bm_local = bmesh.new()
+    vmap = {}
+    for f in island:
+        for v in f.verts:
+            if v.index not in vmap:
+                vmap[v.index] = bm_local.verts.new(v.co.copy())
+    bm_local.verts.ensure_lookup_table()
+
+    fmap = {}
+    for f in island:
+        new_face = bm_local.faces.new([vmap[v.index] for v in f.verts])
+        fmap[f.index] = new_face
+    bm_local.faces.ensure_lookup_table()
+    bm_local.normal_update()
+
+    adjacency = {f.index: set() for f in island}
+    for f in island:
+        for e in f.edges:
+            if len(e.link_faces) == 2:
+                f1, f2 = e.link_faces
+                adjacency[f1.index].add(f2.index)
+                adjacency[f2.index].add(f1.index)
+    
+    seed = _select_seed_face(island)
+    if seed is None:
+        bm_local.free()
+        return flipped_local
+
+    seed_local = fmap[seed.index]
+    bm_local.faces.ensure_lookup_table()
+    bm_local.normal_update()
+    seed_normal = seed_local.normal.copy()
+
+    if inside:
+        seed_normal.negate()
+
+    visited = set()
+    stack = [seed.index]
+    while stack:
+        idx = stack.pop()
+        if idx in visited:
+            continue
+        visited.add(idx)
+        f_local = fmap[idx]
+
+        if f_local.normal.dot(seed_normal) < 0:
+            f_local.normal_flip()
+            flipped_local.add(idx)
+            bm_local.normal_update()
+
+        for n_idx in adjacency[idx]:
+            if n_idx not in visited:
+                stack.append(n_idx)
+
+    bm_local.free()
+    return flipped_local
+
+# # ------------------------------
+# # Public API: find flipped faces
+# # ------------------------------
+
+def find_flipped_faces(obj, threshold=0.999):
+    if getattr(obj, "type", None) != "MESH":
+        return []
+
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    bm.faces.ensure_lookup_table()
+    bm.normal_update()
+
+    current_status = {f.index: f.normal.copy() for f in bm.faces}
+
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    bm.normal_update()
+
+    new_status = {f.index: f.normal.copy() for f in bm.faces}
+
+    flipped = []
+    for idx, orig_normal in current_status.items():
+        dot = orig_normal.dot(new_status[idx])
+        if dot < threshold:
+            flipped.append(idx)
+
+    bm.free()
+    return flipped

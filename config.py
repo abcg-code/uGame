@@ -30,7 +30,7 @@ def update_scan_mode(self, context):
 
 class uGameSettings(bpy.types.PropertyGroup):
     scan_mode: bpy.props.EnumProperty(
-        name="Scan Mode",
+        name="Scan Type",
         description="Choose what to scan",
         items=[
             ('SINGLE', "Active Object", "Scan only the active object"),

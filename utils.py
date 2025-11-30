@@ -24,7 +24,6 @@ import bpy
 from .helpers import (
     get_uv_bounds
 )
-
 from .checks import (
     check_geometry,
     check_uvs,
@@ -84,17 +83,6 @@ def get_all_objects_in_collection(collection, types={'MESH', 'ARMATURE'}):
         objects.extend(get_all_objects_in_collection(child))
     return objects
 
-def collect_object_sections(obj, settings):
-    sections = {}
-
-    sections["Geometry"] = check_geometry(obj, settings)
-    sections["Textures"] = check_textures(obj)
-    sections["UVs"] = check_uvs(obj)
-    sections["Rigging"] = check_rigging(obj) if obj.type == 'ARMATURE' else []
-    sections["Modifiers"] = check_object_modifiers(obj)
-
-    return sections
-
 def get_collection_uv_utilization(collection):
     report = []
     all_uvs = []
@@ -119,3 +107,4 @@ def get_collection_uv_utilization(collection):
     level = "INFO" if utilization >= 90 else "WARNING"
     report.append(("UV Space Utilization", f"{utilization}%", level))
     return report
+

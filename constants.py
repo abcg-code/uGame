@@ -20,22 +20,32 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, see https://www.gnu.org/licenses.
 '''
 
+import re
+
 section_aliases = {
-    "Unapplied Transforms": "Transforms",
-    "Transforms Applied": "Transforms",
-    "Missing Texture Map: Diffuse": "Textures",
-    "Missing Texture Map: Normal": "Textures",
-    "Missing Texture Map: Roughness": "Textures",
-    "Missing Texture Map: Metallic": "Textures",
-    "Missing Texture Map: Emissive": "Textures",
-    "Missing Texture Map: Specular": "Textures",
-    "Missing Texture Map: Ambient Occlusion": "Textures",
+    "Normals": "Geometry",
+    "Unapplied Transforms": "Geometry",
+    "Transforms Applied": "Geometry",
+    "Double Vertices": "Geometry",
+    "Topology": "Geometry",
+    "Counts": "Geometry",
+
     "Marked Seams": "UVs",
+    "Seams": "UVs",
     "Unwrapping Quality": "UVs",
     "Texel Density Ratio": "UVs",
+
+    "Texture name invalid": "Textures",
+    "Contains disallowed term": "Textures",
+    "Resolution too high for background Asset": "Textures",
+    "Resolution too low for Hero Asset": "Textures",
+    "Very low resolution": "Textures",
+    "Not power-of-two": "Textures",
+    "Missing Texture Map": "Textures",
+
     "Modifier": "Modifiers",
     "Modifiers": "Modifiers",
-    "Normals": "Geometry",
+    
     "Bone Count": "Rigging",
     "Bone Naming OK": "Rigging",
     "Hierarchy": "Rigging",
@@ -49,18 +59,21 @@ section_aliases = {
 
 valid_prefixes = ["T_", "TEX_"]
 
+def normalize_token(s: str) -> str:
+    return re.sub(r'[^a-z0-9]', '', s.lower())
+
 required_maps = {
-    "Diffuse": {s.lower() for s in {"_c", "_col", "_color", "_basecolor", "_base_color", "_albedo", "_diffuse", "_diff"}},
-    "Normal": {s.lower() for s in {"_n", "_nrm", "_normal", "_h", "_height", "_nml"}},
-    "Roughness": {s.lower() for s in {"_r", "_roughness", "_rma", "_rough", "_rgh"}}
+    "Diffuse": {normalize_token(s) for s in {"_c", "_col", "_color", "_bc", "_basecolor", "_base_color", "_albedo", "_d", "_diffuse", "_diff"}},
+    "Normal": {normalize_token(s) for s in {"_n", "_nrm", "_normal", "_h", "_height", "_nml"}},
+    "Roughness": {normalize_token(s) for s in {"_r", "_roughness", "_rma", "_rough", "_rgh", "_orm", "_mrh"}}
 }
 
 optional_maps = {
-    "Metallic": {s.lower() for s in {"_m", "_metallic", "_rma", "_met"}},
-    "Emissive": {s.lower() for s in {"_e", "_emmissive"}},
-    "Specular": {s.lower() for s in {"_s", "_spec", "_specular"}},
-    "Ambient Occlusion": {s.lower() for s in {"_ao", "_occlusion", "_rma"}},
-    "Alpha": {s.lower() for s in {"_a", "_alpha", "_o", "_opacity"}}
+    "Metallic": {normalize_token(s) for s in {"_m", "_mt", "_mtl", "_metalness", "_metallic", "_rma", "_met", "_orm"}},
+    "Emissive": {normalize_token(s) for s in {"_e", "_ems", "_emmissive", "_g", "_glow"}},
+    "Specular": {normalize_token(s) for s in {"_s", "_spec", "_specular"}},
+    "Ambient Occlusion": {normalize_token(s) for s in {"_ao", "_a", "_occlusion", "_rma", "_orm"}},
+    "Alpha": {normalize_token(s) for s in {"_a", "_alpha", "_mask", "_opacity"}}
 }
 
 banned_patterns = ["default*", "material*", "texture*",
