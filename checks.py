@@ -45,12 +45,7 @@ from .helpers import (
     ensure_object_mode,
     is_hero_asset,
     aaa_mode,
-    # is_multi_object_asset,
-    # build_bvh,
-    # mesh_centroid,
-    # face_neighbors_indexed,
-    find_flipped_faces,
-    # find_flipped_faces_by_angle
+    find_flipped_faces
 )
 from .constants import (
     required_maps,
